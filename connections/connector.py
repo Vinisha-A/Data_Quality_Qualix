@@ -87,22 +87,7 @@ class ConnectorEngine:
         else:
             return f"SUM(CASE WHEN {q_col} IS NOT NULL AND {q_col} != '' THEN 1 ELSE 0 END)"
 
-    def _hash_validation_sql(self, q_col):
-        t = str(self.connection.connection_type).lower()
-        if t == 'postgresql':
-            return f"MD5(CAST(SUM(hashtext(CAST({q_col} AS TEXT))) AS TEXT))"
-        elif t == 'mysql':
-            return f"MD5(CAST(SUM(CRC32(CAST({q_col} AS CHAR))) AS CHAR))"
-        elif t == 'sqlite':
-            return f"CAST(SUM(LENGTH(COALESCE(CAST({q_col} AS TEXT), ''))) AS TEXT)"
-        elif t == 'databricks':
-            return f"CAST(SUM(hash(CAST({q_col} AS STRING))) AS STRING)"
-        elif t in ('mssql', 'sqlserver'):
-            return f"CAST(SUM(CAST(BINARY_CHECKSUM({q_col}) AS BIGINT)) AS VARCHAR)"
-        elif t == 'oracle':
-            return f"CAST(SUM(ORA_HASH({q_col})) AS VARCHAR(100))"
-        else:
-            return f"CAST(SUM(LENGTH(COALESCE(CAST({q_col} AS VARCHAR), ''))) AS VARCHAR)"
+
 
     def get_lakehouse_connection(self):
         """Get a direct JDBC connection to Lakehouse using jaydebeapi."""
@@ -664,12 +649,6 @@ class ConnectorEngine:
             return 1250
         elif op_lower == 'equals_check':
             return 'mock_value'
-        elif op_lower == 'case_insensitive_check':
-            return 'mock_value'
-        elif op_lower == 'trim_check':
-            return 0
-        elif op_lower == 'contains_check':
-            return 0
         elif op_lower == 'starts_with_check':
             return 0
         elif op_lower == 'ends_with_check':
@@ -678,8 +657,14 @@ class ConnectorEngine:
             return 0
         elif op_lower == 'equals':
             return 75000
-        elif op_lower == 'hash_validation':
-            return 'mock_hash_value_12345'
+        elif op_lower == 'std_dev':
+            return 2.5
+        elif op_lower == 'variance':
+            return 6.25
+        elif op_lower == 'median':
+            return 250.0
+        elif op_lower == 'mode':
+            return 250.0
         return 1250
 
     def test_connection(self):
@@ -1045,6 +1030,46 @@ class ConnectorEngine:
         q_col = self._quote_identifier(column)
         full_table = self._build_full_table_name(table, schema=schema if schema and schema != 'file' else None, catalog=catalog)
 
+        # Add date filter conditions
+        conditions = []
+        if date_column:
+            q_date_col = self._quote_identifier(date_column)
+            if date_operator:
+                if date_start:
+                    conditions.append(f'{q_date_col} {date_operator} :date_start')
+            else:
+                if date_start:
+                    conditions.append(f'{q_date_col} {date_operator_start} :date_start')
+                if date_end:
+                    conditions.append(f'{q_date_col} {date_operator_end} :date_end')
+
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+
+        t = str(self.connection.connection_type).lower()
+
+        # Database-specific SQL expressions for new operations
+        std_expr = f"STDDEV({q_col})"
+        var_expr = f"VARIANCE({q_col})"
+
+        if t == 'postgresql':
+            median_expr = f"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {q_col})"
+        elif t == 'oracle' or t == 'db2':
+            median_expr = f"MEDIAN({q_col})"
+        elif t == 'databricks':
+            median_expr = f"PERCENTILE({q_col}, 0.5)"
+        else:
+            median_expr = f"(SELECT AVG(val) FROM (SELECT {q_col} AS val, ROW_NUMBER() OVER (ORDER BY {q_col}) AS row_num, COUNT(*) OVER () AS total_count FROM {full_table}{where_clause}) AS t WHERE row_num IN (FLOOR((total_count+1)/2), CEIL((total_count+1)/2)))"
+
+        if t == 'postgresql':
+            mode_expr = f"MODE() WITHIN GROUP (ORDER BY {q_col})"
+        elif t == 'oracle':
+            mode_expr = f"STATS_MODE({q_col})"
+        elif t == 'databricks':
+            mode_expr = f"MODE({q_col})"
+        else:
+            and_cond_str = " AND " + " AND ".join(conditions) if conditions else ""
+            mode_expr = f"(SELECT {q_col} FROM {full_table} WHERE {q_col} IS NOT NULL {and_cond_str} GROUP BY {q_col} ORDER BY COUNT(*) DESC LIMIT 1)"
+
         op_map = {
             'count': f'COUNT({q_col})',
             'min': f'MIN({q_col})',
@@ -1063,30 +1088,17 @@ class ConnectorEngine:
             'range_check': f'SUM(CASE WHEN {q_col} >= 0 THEN 1 ELSE 0 END)',
             'equals': f'SUM({q_col})',
             'equals_check': f'MIN({q_col})',
-            'case_insensitive_check': f'MIN(LOWER({q_col}))',
-            'trim_check': f'SUM(CASE WHEN {q_col} != TRIM({q_col}) THEN 1 ELSE 0 END)',
-            'contains_check': f'SUM(CASE WHEN {q_col} LIKE \'% %\' THEN 1 ELSE 0 END)',
             'starts_with_check': f'SUM(CASE WHEN {q_col} IS NOT NULL AND SUBSTR({q_col}, 1, 1) BETWEEN \'A\' AND \'z\' THEN 1 ELSE 0 END)',
             'ends_with_check': f'SUM(CASE WHEN {q_col} IS NOT NULL AND SUBSTR({q_col}, LENGTH({q_col}), 1) BETWEEN \'A\' AND \'z\' THEN 1 ELSE 0 END)',
             'pattern_match': self._pattern_match_sql(q_col),
-            'hash_validation': self._hash_validation_sql(q_col),
+            'std_dev': std_expr,
+            'variance': var_expr,
+            'median': median_expr,
+            'mode': mode_expr,
         }
 
         agg_expr = op_map.get(operation, f'COUNT({q_col})')
         query = f"SELECT {agg_expr} AS result FROM {full_table}"
-
-        # Add date filter
-        conditions = []
-        if date_column:
-            q_date_col = self._quote_identifier(date_column)
-            if date_operator:
-                if date_start:
-                    conditions.append(f'{q_date_col} {date_operator} :date_start')
-            else:
-                if date_start:
-                    conditions.append(f'{q_date_col} {date_operator_start} :date_start')
-                if date_end:
-                    conditions.append(f'{q_date_col} {date_operator_end} :date_end')
 
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
@@ -1169,13 +1181,13 @@ class ConnectorEngine:
                 'range_check': lambda: (col >= 0).sum() if pd.api.types.is_numeric_dtype(col) else len(col),
                 'equals': lambda: col.sum(),
                 'equals_check': lambda: col.min() if not col.empty else None,
-                'case_insensitive_check': lambda: col.astype(str).str.lower().min() if not col.empty else None,
-                'trim_check': lambda: col.astype(str).apply(lambda x: x != x.strip()).sum(),
-                'contains_check': lambda: col.astype(str).str.contains(' ').sum(),
                 'starts_with_check': lambda: col.astype(str).str.slice(0, 1).str.isalpha().sum(),
                 'ends_with_check': lambda: col.astype(str).str.slice(-1).str.isalpha().sum(),
                 'pattern_match': lambda: col.astype(str).str.match(r'^[a-zA-Z0-9_\-\.\s@]+$').sum(),
-                'hash_validation': lambda: self._file_hash_calculation(col),
+                'std_dev': lambda: col.std() if len(col.dropna()) > 1 else 0.0,
+                'variance': lambda: col.var() if len(col.dropna()) > 1 else 0.0,
+                'median': lambda: col.median() if not col.dropna().empty else None,
+                'mode': lambda: col.mode().iloc[0] if not col.dropna().empty and len(col.mode()) > 0 else None,
             }
 
             func = op_map.get(operation)
@@ -1189,11 +1201,7 @@ class ConnectorEngine:
             logger.error(f"File aggregation error: {e}")
         return None
 
-    def _file_hash_calculation(self, col):
-        import hashlib
-        hashes = col.dropna().astype(str).apply(lambda x: int(hashlib.md5(x.encode('utf-8')).hexdigest(), 16) % (2**31 - 1))
-        hash_sum = hashes.sum()
-        return hashlib.md5(str(hash_sum).encode('utf-8')).hexdigest()
+
 
     def check_duplicates(self, schema, table, column, catalog=None, date_column=None, date_start=None, date_end=None, date_operator=None, date_operator_start='>=', date_operator_end='<='):
         """Check for duplicate values in a column with optional date filtering."""

@@ -5,7 +5,7 @@ from django.urls import reverse
 from django.utils import timezone
 from connections.models import DataConnection
 from mappings.models import Mapping, ColumnMapping, ValidationRule
-from validations.models import ValidationRun
+from validations.models import ValidationRun, ValidationResult
 from validations.views import get_datatype_category, get_applicable_operations
 
 class ValidationWorkspaceEnhancementsTestCase(TestCase):
@@ -53,15 +53,19 @@ class ValidationWorkspaceEnhancementsTestCase(TestCase):
         self.assertIn('unique_check', int_ops)
         self.assertIn('distinct_count', int_ops)
         self.assertIn('data_type_check', int_ops)
+        self.assertIn('std_dev', int_ops)
+        self.assertIn('variance', int_ops)
+        self.assertIn('median', int_ops)
+        self.assertIn('mode', int_ops)
 
         str_ops = get_applicable_operations('VARCHAR')
         self.assertIn('length_sum_check', str_ops)
         self.assertIn('regex_check', str_ops)
         self.assertNotIn('sum', str_ops)
         self.assertNotIn('equals_check', str_ops)
-        self.assertIn('case_insensitive_check', str_ops)
-        self.assertIn('trim_check', str_ops)
-        self.assertIn('contains_check', str_ops)
+        self.assertNotIn('case_insensitive_check', str_ops)
+        self.assertNotIn('trim_check', str_ops)
+        self.assertNotIn('contains_check', str_ops)
         self.assertNotIn('starts_with_check', str_ops)
         self.assertNotIn('ends_with_check', str_ops)
         self.assertIn('pattern_match', str_ops)
@@ -99,15 +103,16 @@ class ValidationWorkspaceEnhancementsTestCase(TestCase):
             engine = ConnectorEngine(file_conn)
             
             # String checks
-            self.assertEqual(engine.get_aggregation('file', 'test_data.csv', 'str_col', 'case_insensitive_check'), ' hello')
-            self.assertEqual(engine.get_aggregation('file', 'test_data.csv', 'str_col', 'trim_check'), 1)
-            self.assertEqual(engine.get_aggregation('file', 'test_data.csv', 'str_col', 'contains_check'), 1)
             self.assertEqual(engine.get_aggregation('file', 'test_data.csv', 'str_col', 'pattern_match'), 5)
             self.assertEqual(engine.get_aggregation('file', 'test_data.csv', 'str_col', 'distinct_count'), 5)
             self.assertEqual(engine.get_aggregation('file', 'test_data.csv', 'str_col', 'unique_check'), 5)
             
             # Numeric checks
             self.assertEqual(engine.get_aggregation('file', 'test_data.csv', 'int_col', 'count'), 5)
+            self.assertAlmostEqual(engine.get_aggregation('file', 'test_data.csv', 'int_col', 'std_dev'), 15.811388, places=5)
+            self.assertEqual(engine.get_aggregation('file', 'test_data.csv', 'int_col', 'variance'), 250.0)
+            self.assertEqual(engine.get_aggregation('file', 'test_data.csv', 'int_col', 'median'), 30.0)
+            self.assertEqual(engine.get_aggregation('file', 'test_data.csv', 'int_col', 'mode'), 10)
             
             # Mock DB checks
             db_conn = DataConnection.objects.create(
@@ -119,6 +124,10 @@ class ValidationWorkspaceEnhancementsTestCase(TestCase):
             db_engine = ConnectorEngine(db_conn)
             self.assertEqual(db_engine.get_aggregation('main', 'tbl', 'val', 'unique_check'), 1250)
             self.assertEqual(db_engine.get_aggregation('main', 'tbl', 'val', 'distinct_count'), 150)
+            self.assertEqual(db_engine.get_aggregation('main', 'tbl', 'val', 'std_dev'), 2.5)
+            self.assertEqual(db_engine.get_aggregation('main', 'tbl', 'val', 'variance'), 6.25)
+            self.assertEqual(db_engine.get_aggregation('main', 'tbl', 'val', 'median'), 250.0)
+            self.assertEqual(db_engine.get_aggregation('main', 'tbl', 'val', 'mode'), 250.0)
 
     def test_quick_validate_with_all_columns(self):
         # Authenticate client
@@ -521,31 +530,12 @@ class ValidationWorkspaceEnhancementsTestCase(TestCase):
                 triggered_by=self.user,
                 trigger_type='manual',
                 parameters={
-                    'col:contains_check': 'pen',
                     'col:pattern_match': '^[a-zA-Z\\s]+$',
                 }
             )
             
             from validations.engine import ValidationEngine
             engine = ValidationEngine(run)
-            
-            # Test case_insensitive_check
-            res = engine._run_check(col_map, 'case_insensitive_check')
-            self.assertFalse(res.is_match)
-            self.assertEqual(res.source_value, 'false')
-            self.assertIn("Mismatch at row 1", res.difference)
-            
-            # Test trim_check
-            res_trim = engine._run_check(col_map, 'trim_check')
-            self.assertEqual(res_trim.source_value, 'Found')
-            self.assertEqual(res_trim.target_value, 'Not Found')
-            self.assertFalse(res_trim.is_match)
-            
-            # Test contains_check
-            res_contains = engine._run_check(col_map, 'contains_check')
-            self.assertFalse(res_contains.is_match)
-            self.assertEqual(res_contains.source_value, 'false')
-            self.assertIn("Row 1 failed check", res_contains.difference)
             
             # Test pattern_match with matching regex
             res_pat_match = engine._run_check(col_map, 'pattern_match')
@@ -605,11 +595,104 @@ class ValidationWorkspaceEnhancementsTestCase(TestCase):
         from validations.engine import ValidationEngine
         engine = ValidationEngine(run)
 
-        # Since it is mocked due to dummy_host, get_aggregation returns 1250 for row_count, unique_check, count, distinct_count.
         res = engine._run_check(col_map, 'count')
         self.assertTrue(res.is_match)
         self.assertEqual(res.source_value, '1250')
         self.assertEqual(res.target_value, '1250')
+
+    def test_pipeline_monitor_history_view(self):
+        # Authenticate client
+        self.client.login(username='testuser', password='password123')
+        
+        # Create mapping and validation runs
+        mapping = Mapping.objects.create(
+            name='My Test Pipeline History Mapping',
+            source_connection=self.source_conn,
+            target_connection=self.target_conn,
+            created_by=self.user
+        )
+        run1 = ValidationRun.objects.create(
+            mapping=mapping,
+            status='completed',
+            triggered_by=self.user
+        )
+        run2 = ValidationRun.objects.create(
+            mapping=mapping,
+            status='failed',
+            triggered_by=self.user
+        )
+        
+        url = reverse('validations:pipeline_history', args=[mapping.id])
+        response = self.client.get(url)
+        
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'My Test Pipeline History Mapping')
+        self.assertContains(response, 'Monitor Run History')
+        # Check that both validation runs are rendered
+        self.assertContains(response, f'status-badge-{run1.id}')
+        self.assertContains(response, f'status-badge-{run2.id}')
+
+    def test_validation_results_preserved_on_pipeline_edit(self):
+        # Authenticate client
+        self.client.login(username='testuser', password='password123')
+        
+        # Create mapping and column mapping
+        mapping = Mapping.objects.create(
+            name='Preservation Test Mapping',
+            source_connection=self.source_conn,
+            target_connection=self.target_conn,
+            created_by=self.user,
+            source_table='customers'
+        )
+        col_map = ColumnMapping.objects.create(
+            mapping=mapping,
+            source_column='email',
+            source_datatype='VARCHAR',
+            target_column='email',
+            target_datatype='VARCHAR'
+        )
+        
+        # Create run and validation result
+        run = ValidationRun.objects.create(
+            mapping=mapping,
+            status='completed',
+            triggered_by=self.user
+        )
+        result = ValidationResult.objects.create(
+            run=run,
+            column_mapping=col_map,
+            source_column=col_map.source_column,
+            target_column=col_map.target_column,
+            operation='null_check',
+            source_value='0',
+            target_value='0',
+            is_match=True
+        )
+        
+        # Verify result is initially linked and has column values
+        self.assertEqual(result.column_mapping, col_map)
+        self.assertEqual(result.source_column, 'email')
+        
+        # Delete column mapping (simulating pipeline edit or deletion of a column mapping)
+        col_map.delete()
+        
+        # Verify the validation result is PRESERVED (not cascaded-deleted)
+        result.refresh_from_db()
+        self.assertIsNone(result.column_mapping)
+        self.assertEqual(result.source_column, 'email')
+        self.assertEqual(result.target_column, 'email')
+        
+        # Verify the report page renders successfully with column names intact
+        url = reverse('validations:report', args=[run.id])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'email')
+        
+        # Verify Excel export also runs successfully and handles the deleted mapping
+        export_url = reverse('validations:export', args=[run.id])
+        response_export = self.client.get(export_url)
+        self.assertEqual(response_export.status_code, 200)
+        self.assertEqual(response_export['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 import os
@@ -765,5 +848,70 @@ class AutomatedEmailNotificationTestCase(TestCase):
         
         if os.path.exists(notification.attachment_path):
             os.remove(notification.attachment_path)
+
+
+from unittest.mock import patch, MagicMock
+from validations.engine import ValidationEngine
+from connections.connector import ConnectorEngine
+
+class LakehouseAggregationTestCase(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='lakeuser', password='password123')
+        self.conn = DataConnection.objects.create(
+            name='Lakehouse Connection',
+            connection_type='lakehouse',
+            host='lakehouse-server',
+            database_name='lakehouse_db',
+            created_by=self.user,
+            is_active=True
+        )
+        self.mapping = Mapping.objects.create(
+            name='Lakehouse Test Mapping',
+            source_connection=self.conn,
+            source_table='int_fct_vp_ath3',
+            source_schema='lm_edw_hdfc_dse',
+            target_connection=self.conn,
+            target_table='int_fct_vp_ath3',
+            target_schema='lm_edw_hdfc_dse',
+            created_by=self.user,
+            is_active=True
+        )
+        self.col_map = ColumnMapping.objects.create(
+            mapping=self.mapping,
+            source_column='val',
+            target_column='val',
+            source_datatype='numeric',
+            target_datatype='numeric'
+        )
+        self.rule = ValidationRule.objects.create(
+            column_mapping=self.col_map,
+            operation='median',
+            is_active=True
+        )
+        self.run = ValidationRun.objects.create(
+            mapping=self.mapping,
+            status='running',
+            triggered_by=self.user
+        )
+
+    def test_lakehouse_median_query_uses_approx_percentile(self):
+        engine = ValidationEngine(self.run)
+        
+        # Mock execute_query to inspect constructed aggregate query
+        mock_execute = MagicMock(return_value=None)
+        
+        with patch.object(ConnectorEngine, 'is_mocked', return_value=False), \
+             patch.object(ConnectorEngine, 'execute_query', mock_execute):
+             
+            engine._prefetch_all_aggregates([self.col_map])
+            
+            self.assertTrue(mock_execute.called)
+            called_args = mock_execute.call_args[0]
+            constructed_sql = called_args[0]
+            
+            # Assert memory-efficient approx_percentile is generated and window order-by is avoided
+            self.assertIn('approx_percentile', constructed_sql.lower())
+            self.assertNotIn('row_number() over', constructed_sql.lower())
+
 
 

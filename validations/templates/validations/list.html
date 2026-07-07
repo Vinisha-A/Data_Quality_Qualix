@@ -54,7 +54,11 @@
                     {% for run in runs %}
                     <tr>
                         <td class="fw-600">{{ run.rev_index }}</td>
-                        <td>{{ run.mapping.name }}</td>
+                        <td>
+                            <a href="{% url 'validations:pipeline_history' run.mapping.id %}" class="fw-600" style="color: var(--primary); text-decoration: none;">
+                                {{ run.mapping.name }}
+                            </a>
+                        </td>
                         <td>
                             <span class="badge badge-dot {% if run.status == 'completed' %}badge-success{% elif run.status == 'failed' %}badge-danger{% elif run.status == 'running' %}badge-warning{% else %}badge-muted{% endif %}"
                                   id="status-badge-{{ run.id }}">

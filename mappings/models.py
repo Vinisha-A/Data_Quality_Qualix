@@ -108,11 +108,11 @@ class ValidationRule(models.Model):
         ('range_check', 'Range Check'),
         ('min_date', 'Min Date'),
         ('max_date', 'Max Date'),
-        ('case_insensitive_check', 'Case Insensitive Check'),
-        ('trim_check', 'Trim Check'),
-        ('contains_check', 'Contains Check'),
         ('pattern_match', 'Pattern Match'),
-        ('hash_validation', 'Hash Validation'),
+        ('std_dev', 'Standard Deviation'),
+        ('variance', 'Variance'),
+        ('median', 'Median'),
+        ('mode', 'Mode'),
     ]
 
     column_mapping = models.ForeignKey(

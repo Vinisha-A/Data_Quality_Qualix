@@ -85,6 +85,8 @@ class ValidationEngine:
                         results_to_create.append(ValidationResult(
                             run=self.run,
                             column_mapping=col_mapping,
+                            source_column=col_mapping.source_column,
+                            target_column=col_mapping.target_column,
                             operation=rule.operation,
                             source_value='ERROR',
                             target_value='ERROR',
@@ -171,19 +173,6 @@ class ValidationEngine:
                         except (ValueError, TypeError):
                             pass
 
-                # Trim check formatting: Found / Not Found
-                if operation == 'trim_check':
-                    try:
-                        src_count = int(float(source_value)) if source_value is not None else 0
-                        source_value = 'Found' if src_count > 0 else 'Not Found'
-                    except (ValueError, TypeError):
-                        source_value = 'Not Found'
-                    try:
-                        tgt_count = int(float(target_value)) if target_value is not None else 0
-                        target_value = 'Found' if tgt_count > 0 else 'Not Found'
-                    except (ValueError, TypeError):
-                        target_value = 'Not Found'
-
                 # Compare values
                 is_match = self._compare(source_value, target_value, operation)
                 difference = '0'
@@ -204,7 +193,7 @@ class ValidationEngine:
                         else:
                             difference = '0' if str(source_value).strip() == str(target_value).strip() else '1'
         else:
-            row_by_row_ops = ('case_insensitive_check', 'contains_check', 'pattern_match')
+            row_by_row_ops = ('pattern_match',)
             
             if operation in row_by_row_ops:
                 # Resolve source date filters
@@ -268,22 +257,7 @@ class ValidationEngine:
                     date_operator=tgt_date_operator,
                 )
 
-                if operation == 'case_insensitive_check':
-                    if len(source_vals) != len(target_vals):
-                        is_match = False
-                        difference = f"Row count mismatch: source={len(source_vals)}, target={len(target_vals)}"
-                    else:
-                        is_match = True
-                        difference = '0'
-                        for i in range(len(source_vals)):
-                            if str(source_vals[i]).lower() != str(target_vals[i]).lower():
-                                is_match = False
-                                difference = f"Mismatch at row {i+1}: source='{source_vals[i]}' target='{target_vals[i]}'"
-                                break
-                    source_value = 'true' if is_match else 'false'
-                    target_value = 'true' if is_match else 'false'
-
-                elif operation == 'pattern_match':
+                if operation == 'pattern_match':
                     param = self.run.parameters.get(f"{col_mapping.source_column}:{operation}")
                     if param is None:
                         param = self.run.parameters.get(f"__all__:{operation}")
@@ -319,43 +293,6 @@ class ValidationEngine:
                         source_value = 'true' if is_match else 'false'
                         target_value = 'true' if is_match else 'false'
 
-                elif operation == 'contains_check':
-                    param = self.run.parameters.get(f"{col_mapping.source_column}:{operation}")
-                    if param is None:
-                        param = self.run.parameters.get(f"__all__:{operation}")
-                    if param is None:
-                        param = ' '
-                    
-                    source_ok = True
-                    source_error = None
-                    for i, val in enumerate(source_vals):
-                        if param not in str(val):
-                            source_ok = False
-                            source_error = f"Row {i+1} failed check (value='{val}')"
-                            break
-                    
-                    target_ok = True
-                    target_error = None
-                    for i, val in enumerate(target_vals):
-                        if param not in str(val):
-                            target_ok = False
-                            target_error = f"Row {i+1} failed check (value='{val}')"
-                            break
-                    
-                    is_match = source_ok and target_ok
-                    source_value = 'true' if source_ok else 'false'
-                    target_value = 'true' if target_ok else 'false'
-                    
-                    if is_match:
-                        difference = '0'
-                    else:
-                        errs = []
-                        if not source_ok:
-                            errs.append(f"Source: {source_error}")
-                        if not target_ok:
-                            errs.append(f"Target: {target_error}")
-                        difference = "; ".join(errs)
-
             else:
                 # Traditional aggregated check logic
                 source_value = self._get_value(
@@ -390,19 +327,7 @@ class ValidationEngine:
                         except (ValueError, TypeError):
                             pass
 
-                # Trim check formatting: Found / Not Found
-                if operation == 'trim_check':
-                    # Original trim check returns the count of untrimmed rows
-                    try:
-                        src_count = int(float(source_value)) if source_value is not None else 0
-                        source_value = 'Found' if src_count > 0 else 'Not Found'
-                    except (ValueError, TypeError):
-                        source_value = 'Not Found'
-                    try:
-                        tgt_count = int(float(target_value)) if target_value is not None else 0
-                        target_value = 'Found' if tgt_count > 0 else 'Not Found'
-                    except (ValueError, TypeError):
-                        target_value = 'Not Found'
+
 
                 # Compare values
                 is_match = self._compare(source_value, target_value, operation)
@@ -427,6 +352,8 @@ class ValidationEngine:
         result = ValidationResult(
             run=self.run,
             column_mapping=col_mapping,
+            source_column=col_mapping.source_column,
+            target_column=col_mapping.target_column,
             operation=operation,
             source_value=str(source_value) if source_value is not None else None,
             target_value=str(target_value) if target_value is not None else None,
@@ -608,9 +535,7 @@ class ValidationEngine:
         target_rules = []
     
         row_by_row_ops = (
-            'case_insensitive_check',
-            'contains_check',
-            'pattern_match'
+            'pattern_match',
         )
     
         for col_mapping in column_mappings:
@@ -834,21 +759,27 @@ class ValidationEngine:
         alias_to_rule = {}
         full_table = engine._build_full_table_name(table, schema=schema if schema and schema != 'file' else None, catalog=catalog)
 
+        # Build date filter conditions ahead of time so they can be referenced inside subqueries
+        conditions = []
+        if date_column:
+            q_date_col = engine._quote_identifier(date_column)
+            if date_operator:
+                if date_start:
+                    conditions.append(f'{q_date_col} {date_operator} :date_start')
+            else:
+                if date_start:
+                    conditions.append(f'{q_date_col} {date_operator_start} :date_start')
+                if date_end:
+                    conditions.append(f'{q_date_col} {date_operator_end} :date_end')
+
+        where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+
         for idx, (col_mapping, operation) in enumerate(rules):
             col = col_mapping.source_column if is_source else col_mapping.target_column
             q_col = engine._quote_identifier(col)
 
             if operation == 'duplicate_check':
                 expr = f"COUNT(*) - COUNT(DISTINCT {q_col})"
-            elif operation == 'contains_check':
-                p = self.run.parameters.get(f"{col_mapping.source_column}:{operation}")
-                if p is None:
-                    p = self.run.parameters.get(f"__all__:{operation}")
-                if p is None:
-                    p = ' '
-                param_alias = f"param_{idx}"
-                params[param_alias] = f"%{p}%"
-                expr = f"SUM(CASE WHEN {q_col} IS NOT NULL AND {q_col} LIKE :{param_alias} THEN 0 ELSE 1 END)"
             elif operation == 'pattern_match':
                 p = self.run.parameters.get(f"{col_mapping.source_column}:{operation}")
                 if p is None:
@@ -872,23 +803,32 @@ class ValidationEngine:
                     expr = f"SUM(CASE WHEN {q_col} IS NOT NULL AND {q_col} LIKE :{param_alias} THEN 0 ELSE 1 END)"
                 else:
                     expr = f"SUM(CASE WHEN {q_col} IS NOT NULL AND {q_col} LIKE :{param_alias} THEN 0 ELSE 1 END)"
-            elif operation == 'case_insensitive_check':
-                t = str(engine.connection.connection_type).lower()
-                if t == 'postgresql':
-                    expr = f"MD5(CAST(SUM(hashtext(LOWER(CAST({q_col} AS TEXT)))) AS TEXT))"
-                elif t == 'mysql':
-                    expr = f"MD5(CAST(SUM(CRC32(LOWER(CAST({q_col} AS CHAR)))) AS CHAR))"
-                elif t == 'sqlite':
-                    expr = f"CAST(SUM(LENGTH(COALESCE(LOWER(CAST({q_col} AS TEXT)), ''))) AS TEXT)"
-                elif t == 'databricks':
-                    expr = f"CAST(SUM(hash(LOWER(CAST({q_col} AS STRING)))) AS STRING)"
-                elif t in ('mssql', 'sqlserver'):
-                    expr = f"CAST(SUM(CAST(BINARY_CHECKSUM(LOWER({q_col})) AS BIGINT)) AS VARCHAR)"
-                elif t == 'oracle':
-                    expr = f"CAST(SUM(ORA_HASH(LOWER({q_col}))) AS VARCHAR(100))"
-                else:
-                    expr = f"CAST(SUM(LENGTH(COALESCE(LOWER(CAST({q_col} AS VARCHAR)), ''))) AS VARCHAR)"
             else:
+                t = str(engine.connection.connection_type).lower()
+                std_expr = f"STDDEV({q_col})"
+                var_expr = f"VARIANCE({q_col})"
+
+                if t == 'postgresql':
+                    median_expr = f"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {q_col})"
+                elif t == 'oracle' or t == 'db2':
+                    median_expr = f"MEDIAN({q_col})"
+                elif t == 'databricks':
+                    median_expr = f"PERCENTILE({q_col}, 0.5)"
+                elif t in ('lakehouse', 'trino', 'presto', 'athena', 'awsathena'):
+                    median_expr = f"approx_percentile({q_col}, 0.5)"
+                else:
+                    median_expr = f"(SELECT AVG(val) FROM (SELECT {q_col} AS val, ROW_NUMBER() OVER (ORDER BY {q_col}) AS row_num, COUNT(*) OVER () AS total_count FROM {full_table}{where_clause}) AS t WHERE row_num IN (FLOOR((total_count+1)/2), CEIL((total_count+1)/2)))"
+
+                if t == 'postgresql':
+                    mode_expr = f"MODE() WITHIN GROUP (ORDER BY {q_col})"
+                elif t == 'oracle':
+                    mode_expr = f"STATS_MODE({q_col})"
+                elif t == 'databricks':
+                    mode_expr = f"MODE({q_col})"
+                else:
+                    and_cond_str = " AND " + " AND ".join(conditions) if conditions else ""
+                    mode_expr = f"(SELECT {q_col} FROM {full_table} WHERE {q_col} IS NOT NULL {and_cond_str} GROUP BY {q_col} ORDER BY COUNT(*) DESC LIMIT 1)"
+
                 op_map = {
                     'count': f'COUNT({q_col})',
                     'min': f'MIN({q_col})',
@@ -907,11 +847,13 @@ class ValidationEngine:
                     'range_check': f'SUM(CASE WHEN {q_col} >= 0 THEN 1 ELSE 0 END)',
                     'equals': f'SUM({q_col})',
                     'equals_check': f'MIN({q_col})',
-                    'trim_check': f'SUM(CASE WHEN {q_col} != TRIM({q_col}) THEN 1 ELSE 0 END)',
                     'starts_with_check': f'SUM(CASE WHEN {q_col} IS NOT NULL AND SUBSTR({q_col}, 1, 1) BETWEEN \'A\' AND \'z\' THEN 1 ELSE 0 END)',
                     'ends_with_check': f'SUM(CASE WHEN {q_col} IS NOT NULL AND SUBSTR({q_col}, LENGTH({q_col}), 1) BETWEEN \'A\' AND \'z\' THEN 1 ELSE 0 END)',
                     'pattern_match': engine._pattern_match_sql(q_col),
-                    'hash_validation': engine._hash_validation_sql(q_col),
+                    'std_dev': std_expr,
+                    'variance': var_expr,
+                    'median': median_expr,
+                    'mode': mode_expr,
                 }
                 expr = op_map.get(operation, f'COUNT({q_col})')
 
@@ -923,18 +865,6 @@ class ValidationEngine:
             return {}
 
         query = f"SELECT {', '.join(select_exprs)} FROM {full_table}"
-
-        conditions = []
-        if date_column:
-            q_date_col = engine._quote_identifier(date_column)
-            if date_operator:
-                if date_start:
-                    conditions.append(f'{q_date_col} {date_operator} :date_start')
-            else:
-                if date_start:
-                    conditions.append(f'{q_date_col} {date_operator_start} :date_start')
-                if date_end:
-                    conditions.append(f'{q_date_col} {date_operator_end} :date_end')
 
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
@@ -1001,16 +931,20 @@ class ValidationEngine:
                 res = col.astype(str).str.match(r'^[a-zA-Z0-9_\-\.\s@]+$').sum()
             elif operation == 'range_check':
                 res = (col >= 0).sum() if pd.api.types.is_numeric_dtype(col) else len(col)
-            elif operation == 'trim_check':
-                res = col.astype(str).apply(lambda x: x != x.strip()).sum()
             elif operation == 'starts_with_check':
                 res = col.astype(str).str.slice(0, 1).str.isalpha().sum()
             elif operation == 'ends_with_check':
                 res = col.astype(str).str.slice(-1).str.isalpha().sum()
             elif operation == 'pattern_match':
                 res = col.astype(str).str.match(r'^[a-zA-Z0-9_\-\.\s@]+$').sum()
-            elif operation == 'hash_validation':
-                res = self.source_engine._file_hash_calculation(col)
+            elif operation == 'std_dev':
+                res = col.std() if len(col.dropna()) > 1 else 0.0
+            elif operation == 'variance':
+                res = col.var() if len(col.dropna()) > 1 else 0.0
+            elif operation == 'median':
+                res = col.median() if not col.dropna().empty else None
+            elif operation == 'mode':
+                res = col.mode().iloc[0] if not col.dropna().empty and len(col.mode()) > 0 else None
             else:
                 res = col.count()
             
@@ -1022,10 +956,10 @@ class ValidationEngine:
             return None
 
     def _prefetch_all_row_by_row(self, column_mappings):
-        """Pre-fetch all row-by-row validation checks (e.g. case_insensitive_check, pattern_match, contains_check)
+        """Pre-fetch all row-by-row validation checks (e.g. pattern_match)
         in parallel batch queries and perform streaming validations chunk-by-chunk to prevent memory crashes (OOM)."""
         row_by_row_rules = []
-        row_by_row_ops = ('case_insensitive_check', 'contains_check', 'pattern_match')
+        row_by_row_ops = ('pattern_match',)
         
         for col_mapping in column_mappings:
             rules = [r for r in col_mapping.rules.all() if r.is_active]
@@ -1051,7 +985,7 @@ class ValidationEngine:
                 src_val, tgt_val = prefetched
                 passed = False
                 
-                if operation in ('contains_check', 'pattern_match'):
+                if operation == 'pattern_match':
                     try:
                         src_fail_cnt = int(float(src_val)) if src_val is not None else -1
                         tgt_fail_cnt = int(float(tgt_val)) if tgt_val is not None else -1
@@ -1060,10 +994,6 @@ class ValidationEngine:
                         tgt_fail_cnt = -1
                     
                     if src_fail_cnt == 0 and tgt_fail_cnt == 0:
-                        passed = True
-                
-                elif operation == 'case_insensitive_check':
-                    if src_val is not None and tgt_val is not None and str(src_val) == str(tgt_val):
                         passed = True
                 
                 if passed:
@@ -1242,14 +1172,7 @@ class ValidationEngine:
         import re
         rule_params = {}
         for col_mapping, operation in row_by_row_rules:
-            if operation == 'contains_check':
-                p = self.run.parameters.get(f"{col_mapping.source_column}:{operation}")
-                if p is None:
-                    p = self.run.parameters.get(f"__all__:{operation}")
-                if p is None:
-                    p = ' '
-                rule_params[(col_mapping.id, operation)] = p
-            elif operation == 'pattern_match':
+            if operation == 'pattern_match':
                 p = self.run.parameters.get(f"{col_mapping.source_column}:{operation}")
                 if p is None:
                     p = self.run.parameters.get(f"__all__:{operation}")
@@ -1307,26 +1230,7 @@ class ValidationEngine:
                 src_series = src_chunk[src_col] if src_col in src_chunk.columns else pd.Series([None] * chunk_len)
                 tgt_series = tgt_chunk[tgt_col] if tgt_col in tgt_chunk.columns else pd.Series([None] * chunk_len)
                 
-                if operation == 'case_insensitive_check':
-                    src_s = src_series.fillna('').astype(str).str.lower()
-                    tgt_s = tgt_series.fillna('').astype(str).str.lower()
-                    
-                    src_null = src_series.isna()
-                    tgt_null = tgt_series.isna()
-                    
-                    mismatches = (src_s != tgt_s) | (src_null != tgt_null)
-                    if mismatches.any():
-                        relative_idx = mismatches.values.argmax()
-                        sv = src_series.iloc[relative_idx] if not src_null.iloc[relative_idx] else None
-                        tv = tgt_series.iloc[relative_idx] if not tgt_null.iloc[relative_idx] else None
-                        
-                        state['is_match'] = False
-                        state['source_value'] = 'false'
-                        state['target_value'] = 'false'
-                        state['difference'] = f"Mismatch at row {global_row_idx + relative_idx + 1}: source='{sv}' target='{tv}'"
-                        state['finished'] = True
-                            
-                elif operation == 'pattern_match':
+                if operation == 'pattern_match':
                     pat_re = rule_params[(col_mapping.id, operation)]
                     src_s = src_series.fillna('').astype(str)
                     tgt_s = tgt_series.fillna('').astype(str)
@@ -1352,34 +1256,6 @@ class ValidationEngine:
                             state['difference'] = f"Pattern mismatch at row {global_row_idx + relative_idx + 1}: source failed regex check (value='{sv_str}')"
                         else:
                             state['difference'] = f"Pattern mismatch at row {global_row_idx + relative_idx + 1}: target failed regex check (value='{tv_str}')"
-                            
-                elif operation == 'contains_check':
-                    param = rule_params[(col_mapping.id, operation)]
-                    src_s = src_series.fillna('').astype(str)
-                    tgt_s = tgt_series.fillna('').astype(str)
-                    
-                    src_ok = src_s.str.contains(param, regex=False)
-                    tgt_ok = tgt_s.str.contains(param, regex=False)
-                    
-                    failures = (~src_ok) | (~tgt_ok)
-                    if failures.any():
-                        relative_idx = failures.values.argmax()
-                        sv = src_series.iloc[relative_idx]
-                        tv = tgt_series.iloc[relative_idx]
-                        s_ok = src_ok.iloc[relative_idx]
-                        t_ok = tgt_ok.iloc[relative_idx]
-                        
-                        state['is_match'] = False
-                        state['source_value'] = 'true' if s_ok else 'false'
-                        state['target_value'] = 'true' if t_ok else 'false'
-                        state['finished'] = True
-                        
-                        errs = []
-                        if not s_ok:
-                            errs.append(f"Source: Row {global_row_idx + relative_idx + 1} failed check (value='{sv}')")
-                        if not t_ok:
-                            errs.append(f"Target: Row {global_row_idx + relative_idx + 1} failed check (value='{tv}')")
-                        state['difference'] = "; ".join(errs)
                             
             global_row_idx += chunk_len
 

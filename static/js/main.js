@@ -1445,16 +1445,12 @@ const OP_LISTS = {
         { value: 'length_sum_check', label: 'Length Check' },
         { value: 'sum_length', label: 'Sum Length' },
         { value: 'duplicate_check', label: 'Duplicate Check' },
-        { value: 'case_insensitive_check', label: 'Case Insensitive Check' },
-        { value: 'trim_check', label: 'Trim Check' },
-        { value: 'contains_check', label: 'Contains Check' },
         { value: 'pattern_match', label: 'Pattern Match' },
         { value: 'count', label: 'Count' },
         { value: 'row_count', label: 'Row Count Match' },
         { value: 'unique_check', label: 'Unique Check' },
         { value: 'distinct_count', label: 'Distinct Count' },
-        { value: 'data_type_check', label: 'Data Type Check' },
-        { value: 'hash_validation', label: 'Hash Validation' }
+        { value: 'data_type_check', label: 'Data Type Check' }
     ],
     INTEGER: [
         { value: 'null_check', label: 'Null Check' },
@@ -1468,7 +1464,10 @@ const OP_LISTS = {
         { value: 'unique_check', label: 'Unique Check' },
         { value: 'distinct_count', label: 'Distinct Count' },
         { value: 'data_type_check', label: 'Data Type Check' },
-        { value: 'hash_validation', label: 'Hash Validation' }
+        { value: 'std_dev', label: 'Standard Deviation' },
+        { value: 'variance', label: 'Variance' },
+        { value: 'median', label: 'Median' },
+        { value: 'mode', label: 'Mode' }
     ],
     DATE: [
         { value: 'null_check', label: 'Null Check' },
@@ -1478,8 +1477,7 @@ const OP_LISTS = {
         { value: 'count', label: 'Count' },
         { value: 'row_count', label: 'Row Count Match' },
         { value: 'unique_check', label: 'Unique Check' },
-        { value: 'distinct_count', label: 'Distinct Count' },
-        { value: 'hash_validation', label: 'Hash Validation' }
+        { value: 'distinct_count', label: 'Distinct Count' }
     ],
     BOOLEAN: [
         { value: 'null_check', label: 'Null Check' },
@@ -1487,8 +1485,7 @@ const OP_LISTS = {
         { value: 'count', label: 'Count' },
         { value: 'row_count', label: 'Row Count Match' },
         { value: 'unique_check', label: 'Unique Check' },
-        { value: 'distinct_count', label: 'Distinct Count' },
-        { value: 'hash_validation', label: 'Hash Validation' }
+        { value: 'distinct_count', label: 'Distinct Count' }
     ]
 };
 
@@ -1693,11 +1690,11 @@ function handleColumnSelectionChange() {
             { value: 'unique_check', label: 'Unique Check' },
             { value: 'distinct_count', label: 'Distinct Count' },
             { value: 'data_type_check', label: 'Data Type Check' },
-            { value: 'case_insensitive_check', label: 'Case Insensitive Check' },
-            { value: 'trim_check', label: 'Trim Check' },
-            { value: 'contains_check', label: 'Contains Check' },
             { value: 'pattern_match', label: 'Pattern Match' },
-            { value: 'hash_validation', label: 'Hash Validation' }
+            { value: 'std_dev', label: 'Standard Deviation' },
+            { value: 'variance', label: 'Variance' },
+            { value: 'median', label: 'Median' },
+            { value: 'mode', label: 'Mode' }
         ];
 
         let html = `

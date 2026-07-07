@@ -51,13 +51,13 @@ def get_datatype_category(type_str, name_str=''):
 
 def get_applicable_operations(category):
     if category == 'INTEGER':
-        return ['null_check', 'sum', 'avg', 'min', 'max', 'range_check', 'duplicate_check', 'count', 'row_count', 'unique_check', 'distinct_count', 'data_type_check', 'hash_validation']
+        return ['null_check', 'sum', 'avg', 'min', 'max', 'range_check', 'duplicate_check', 'count', 'row_count', 'unique_check', 'distinct_count', 'data_type_check', 'std_dev', 'variance', 'median', 'mode']
     elif category == 'DATE':
-        return ['min_date', 'max_date', 'null_check', 'duplicate_check', 'count', 'row_count', 'unique_check', 'distinct_count', 'hash_validation']
+        return ['min_date', 'max_date', 'null_check', 'duplicate_check', 'count', 'row_count', 'unique_check', 'distinct_count']
     elif category == 'BOOLEAN':
-        return ['null_check', 'count', 'row_count', 'duplicate_check', 'unique_check', 'distinct_count', 'hash_validation']
+        return ['null_check', 'count', 'row_count', 'duplicate_check', 'unique_check', 'distinct_count']
     else: # VARCHAR
-        return ['null_check', 'length_sum_check', 'sum_length', 'regex_check', 'duplicate_check', 'unique_check', 'distinct_count', 'row_count', 'count', 'case_insensitive_check', 'trim_check', 'contains_check', 'pattern_match', 'data_type_check', 'hash_validation']
+        return ['null_check', 'length_sum_check', 'sum_length', 'regex_check', 'duplicate_check', 'unique_check', 'distinct_count', 'row_count', 'count', 'pattern_match', 'data_type_check']
 
 @login_required
 @contributor_or_admin_required
@@ -338,11 +338,9 @@ def mapping_detail_view(request, mapping_id):
         id=mapping_id
     )
     column_mappings = mapping.column_mappings.prefetch_related('rules').all()
-    runs = mapping.validation_runs.select_related('triggered_by').all().order_by('-created_at')
     return render(request, 'mappings/detail.html', {
         'mapping': mapping,
         'column_mappings': column_mappings,
-        'runs': runs,
     })
 
 

@@ -614,7 +614,7 @@ function validateQuickForm() {
 
     // Prompt for parameter-based operations
     let parameters = {};
-    const needsParamOps = ['contains_check', 'pattern_match'];
+    const needsParamOps = ['pattern_match'];
     for (const mapping of mappings) {
         if (mapping.source_column === '__all__') {
             const selectedOps = mapping.operations || [];
@@ -643,8 +643,6 @@ function validateQuickForm() {
             }
         }
     }
-    document.getElementById('parameters-json').value = JSON.stringify(parameters);
-    
     return true;
 }
 </script>

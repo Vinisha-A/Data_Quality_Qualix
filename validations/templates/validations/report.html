@@ -128,7 +128,15 @@
                     {% for result in results %}
                     <tr>
                         <td class="fw-500">{{ run.mapping.source_table.upper }}</td>
-                        <td class="fw-500">{{ result.column_mapping.source_column }}</td>
+                        <td class="fw-500">
+                            {% if result.source_column %}
+                                {{ result.source_column }}
+                            {% elif result.column_mapping %}
+                                {{ result.column_mapping.source_column }}
+                            {% else %}
+                                Unknown
+                            {% endif %}
+                        </td>
                         <td><strong class="text-primary">{{ result.source_op_display }}</strong></td>
                         <td><strong class="text-primary">{{ result.target_op_display }}</strong></td>
                         <td>

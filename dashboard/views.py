@@ -4,9 +4,11 @@ from django.db.models import Count, Q
 
 from connections.models import DataConnection
 from mappings.models import Mapping, ValidationRule
-from validations.models import ValidationRun
+from validations.models import ValidationRun, ValidationResult
 from workflows.models import Workflow
 from logs.models import AuditLog
+from django.shortcuts import get_object_or_404
+from django.http import JsonResponse
 
 
 @login_required
@@ -176,27 +178,7 @@ HELP_DATA = {
                 'match': 'The count of duplicate values matches between source and target (both should be 0).',
                 'mismatch': 'There is a mismatch of duplicate values.'
             },
-            {
-                'alias': 'Case Insensitive Check',
-                'name': 'case_insensitive_check',
-                'logic': 'Compiles strings when case do not match, converting both source and target values to lowercase. Removes space variations.',
-                'match': 'Strings match after ignoring casing variation (e.g. \'HDFC Bank\' matches \'hdfc bank\').',
-                'mismatch': 'Different characters are found, or spelling differs (e.g. \'HDFC Bank\' vs \'HDFC Bank Ltd\').'
-            },
-            {
-                'alias': 'Trim Check',
-                'name': 'trim_check',
-                'logic': 'Counts the number of records with leading or trailing whitespace characters.',
-                'match': 'Both source and target contain the same number of trimmed/untrimmed values.',
-                'mismatch': 'Mismatches due to differing whitespace, space padding.'
-            },
-            {
-                'alias': 'Contains Check',
-                'name': 'contains_check',
-                'logic': 'Counts the number of rows where the column contains the specified substring.',
-                'match': 'Count of records containing the substring matches between source and target.',
-                'mismatch': 'The counts of substring matching rows differ.'
-            },
+
             {
                 'alias': 'Pattern Match',
                 'name': 'pattern_match',
@@ -246,13 +228,7 @@ HELP_DATA = {
                 'match': 'Datatypes of source and target are compatible character types.',
                 'mismatch': 'Data types are incompatible (e.g. integer vs varchar).'
             },
-            {
-                'alias': 'Hash Validation',
-                'name': 'hash_validation',
-                'logic': 'Aggregates or compares a checksum of the column\'s data values.',
-                'match': 'The generated hash sum matches between source and target.',
-                'mismatch': 'The generated hash sum does not match, indicating differences in some data rows.'
-            }
+
         ]
     },
     'integer': {
@@ -343,11 +319,32 @@ HELP_DATA = {
                 'mismatch': 'Integer data types differ.'
             },
             {
-                'alias': 'Hash Validation',
-                'name': 'hash_validation',
-                'logic': 'Aggregates a hash checksum of integer values.',
-                'match': 'Hash checksum of integers matches exactly.',
-                'mismatch': 'Hash checksum of integers differs.'
+                'alias': 'Standard Deviation',
+                'name': 'std_dev',
+                'logic': 'Computes the standard deviation of all non-null numeric values in the column.',
+                'match': 'The standard deviation matches exactly between source and target.',
+                'mismatch': 'The standard deviation differs.'
+            },
+            {
+                'alias': 'Variance',
+                'name': 'variance',
+                'logic': 'Computes the variance of all non-null numeric values in the column.',
+                'match': 'The variance matches exactly between source and target.',
+                'mismatch': 'The variance differs.'
+            },
+            {
+                'alias': 'Median',
+                'name': 'median',
+                'logic': 'Computes the median (middle value) of all non-null numeric values in the column.',
+                'match': 'The median matches exactly between source and target.',
+                'mismatch': 'The median differs.'
+            },
+            {
+                'alias': 'Mode',
+                'name': 'mode',
+                'logic': 'Finds the most frequent value (mode) in the numeric column.',
+                'match': 'The mode matches exactly between source and target.',
+                'mismatch': 'The mode differs.'
             }
         ]
     },
@@ -444,6 +441,34 @@ HELP_DATA = {
                 'logic': 'Verifies that the column data types are compatible floating point types (e.g. FLOAT vs DOUBLE).',
                 'match': 'Float types are compatible.',
                 'mismatch': 'Float types differ.'
+            },
+            {
+                'alias': 'Standard Deviation',
+                'name': 'std_dev',
+                'logic': 'Computes the standard deviation of all non-null numeric values in the column.',
+                'match': 'The standard deviation matches exactly between source and target.',
+                'mismatch': 'The standard deviation differs.'
+            },
+            {
+                'alias': 'Variance',
+                'name': 'variance',
+                'logic': 'Computes the variance of all non-null numeric values in the column.',
+                'match': 'The variance matches exactly between source and target.',
+                'mismatch': 'The variance differs.'
+            },
+            {
+                'alias': 'Median',
+                'name': 'median',
+                'logic': 'Computes the median (middle value) of all non-null numeric values in the column.',
+                'match': 'The median matches exactly between source and target.',
+                'mismatch': 'The median differs.'
+            },
+            {
+                'alias': 'Mode',
+                'name': 'mode',
+                'logic': 'Finds the most frequent value (mode) in the numeric column.',
+                'match': 'The mode matches exactly between source and target.',
+                'mismatch': 'The mode differs.'
             }
         ]
     },
@@ -506,13 +531,7 @@ HELP_DATA = {
                 'match': 'Distinct date count matches between source and target.',
                 'mismatch': 'Distinct date count differs.'
             },
-            {
-                'alias': 'Hash Validation',
-                'name': 'hash_validation',
-                'logic': 'Aggregates a hash checksum of date values.',
-                'match': 'Hash checksum of date values matches exactly.',
-                'mismatch': 'Hash checksum of date values differs.'
-            }
+
         ]
     }
 }

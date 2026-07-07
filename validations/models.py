@@ -106,7 +106,9 @@ class ValidationResult(models.Model):
     """Individual result for each column-operation check in a validation run."""
 
     run = models.ForeignKey(ValidationRun, on_delete=models.CASCADE, related_name='results')
-    column_mapping = models.ForeignKey(ColumnMapping, on_delete=models.CASCADE)
+    column_mapping = models.ForeignKey(ColumnMapping, on_delete=models.SET_NULL, null=True, blank=True)
+    source_column = models.CharField(max_length=255, blank=True, null=True)
+    target_column = models.CharField(max_length=255, blank=True, null=True)
     operation = models.CharField(max_length=50)
     source_value = models.TextField(blank=True, null=True)
     target_value = models.TextField(blank=True, null=True)
@@ -115,11 +117,12 @@ class ValidationResult(models.Model):
     details = models.JSONField(default=dict, blank=True)
 
     class Meta:
-        ordering = ['column_mapping', 'operation']
+        ordering = ['id']
 
     def __str__(self):
         status = "✓" if self.is_match else "✕"
-        return f"{status} {self.column_mapping.source_column}.{self.operation}"
+        col = self.source_column or (self.column_mapping.source_column if self.column_mapping else 'Unknown')
+        return f"{status} {col}.{self.operation}"
 
     @property
     def source_op_display(self):

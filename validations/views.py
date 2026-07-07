@@ -194,9 +194,10 @@ def export_report(request, run_id):
 
     for r in results:
         res_val = "MATCH" if r.is_match else "MISMATCH"
+        col_name = r.source_column or (r.column_mapping.source_column if r.column_mapping else 'Unknown')
         ws.append([
             mapping.source_table.upper(),
-            r.column_mapping.source_column,
+            col_name,
             r.source_op_display,
             r.target_op_display,
             res_val,
@@ -263,13 +264,13 @@ def get_datatype_category(type_str, name_str=''):
 
 def get_applicable_operations(category):
     if category == 'INTEGER':
-        return ['null_check', 'sum', 'avg', 'min', 'max', 'range_check', 'duplicate_check', 'count', 'row_count', 'unique_check', 'distinct_count', 'data_type_check', 'hash_validation']
+        return ['null_check', 'sum', 'avg', 'min', 'max', 'range_check', 'duplicate_check', 'count', 'row_count', 'unique_check', 'distinct_count', 'data_type_check', 'std_dev', 'variance', 'median', 'mode']
     elif category == 'DATE':
-        return ['min_date', 'max_date', 'null_check', 'duplicate_check', 'count', 'row_count', 'unique_check', 'distinct_count', 'hash_validation']
+        return ['min_date', 'max_date', 'null_check', 'duplicate_check', 'count', 'row_count', 'unique_check', 'distinct_count']
     elif category == 'BOOLEAN':
-        return ['null_check', 'count', 'row_count', 'duplicate_check', 'unique_check', 'distinct_count', 'hash_validation']
+        return ['null_check', 'count', 'row_count', 'duplicate_check', 'unique_check', 'distinct_count']
     else: # VARCHAR
-        return ['null_check', 'length_sum_check', 'sum_length', 'regex_check', 'duplicate_check', 'unique_check', 'distinct_count', 'row_count', 'count', 'case_insensitive_check', 'trim_check', 'contains_check', 'pattern_match', 'data_type_check', 'hash_validation']
+        return ['null_check', 'length_sum_check', 'sum_length', 'regex_check', 'duplicate_check', 'unique_check', 'distinct_count', 'row_count', 'count', 'pattern_match', 'data_type_check']
 
 @login_required
 @contributor_or_admin_required
@@ -594,6 +595,20 @@ def validation_delete_view(request, run_id):
 
 
 @login_required
+def pipeline_monitor_history_view(request, mapping_id):
+    """View monitor run history for a specific pipeline."""
+    mapping = get_object_or_404(
+        Mapping.objects.select_related('source_connection', 'target_connection', 'created_by'),
+        id=mapping_id
+    )
+    runs = mapping.validation_runs.select_related('triggered_by').all().order_by('-created_at')
+    return render(request, 'validations/pipeline_history.html', {
+        'mapping': mapping,
+        'runs': runs,
+    })
+
+
+@login_required
 @contributor_or_admin_required
 @require_POST
 def api_send_report_email(request, run_id):
@@ -631,4 +646,5 @@ def api_send_report_email(request, run_id):
     except Exception as e:
         logger.error(f"Error sending manual email: {e}")
         return JsonResponse({'success': False, 'error': f'Server error: {str(e)}'}, status=500)
+
 
