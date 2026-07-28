@@ -61,14 +61,55 @@ class ConnectorEngine:
 
     def _quote_identifier(self, name):
         """Quote identifier according to database connection type."""
-        if not name:
-            return ""
+        if name == "*":
+            return name
         if self.connection.connection_type in ('mysql', 'databricks'):
             return f"`{name}`"
         elif self.connection.connection_type == 'oracle':
             return f'"{name.upper()}"'
         else:
             return f'"{name}"'
+    def _wrap_date_placeholder(self, placeholder, date_val):
+        """Wrap date/timestamp parameter placeholder with appropriate SQL cast/conversion function."""
+        if not date_val:
+            return placeholder
+        
+        db_type = str(self.connection.connection_type).lower()
+        val_str = str(date_val).strip()
+        has_time = (' ' in val_str or 'T' in val_str or ':' in val_str)
+        
+        if db_type == 'oracle':
+            if has_time:
+                return f"TO_DATE({placeholder}, 'YYYY-MM-DD HH24:MI:SS')"
+            else:
+                return f"TO_DATE({placeholder}, 'YYYY-MM-DD')"
+        elif db_type in ('lakehouse', 'databricks', 'postgresql', 'db2'):
+            cast_type = 'TIMESTAMP' if has_time else 'DATE'
+            return f"CAST({placeholder} AS {cast_type})"
+        elif db_type in ('mysql', 'mssql', 'sqlserver'):
+            cast_type = 'DATETIME' if has_time else 'DATE'
+            return f"CAST({placeholder} AS {cast_type})"
+        
+        return placeholder
+    def _wrap_date_column(self, col_name, date_val):
+        """Wrap date column with CAST to DATE or appropriate DB function if date_val has no time."""
+        if not date_val:
+            return col_name
+        
+        db_type = str(self.connection.connection_type).lower()
+        val_str = str(date_val).strip()
+        has_time = (' ' in val_str or 'T' in val_str or ':' in val_str)
+        
+        if not has_time:
+            # Wrap column in CAST to DATE or equivalent to strip time component
+            if db_type == 'oracle':
+                return f"TRUNC({col_name})"
+            elif db_type in ('lakehouse', 'databricks', 'postgresql', 'db2', 'mysql', 'mssql', 'sqlserver'):
+                return f"CAST({col_name} AS DATE)"
+        
+        return col_name
+
+
 
     def _pattern_match_sql(self, q_col):
         t = str(self.connection.connection_type).lower()
@@ -86,7 +127,6 @@ class ConnectorEngine:
             return f"SUM(CASE WHEN REGEXP_LIKE({q_col}, '^[A-Za-z0-9_\\-\\.\\s@]+$') THEN 1 ELSE 0 END)"
         else:
             return f"SUM(CASE WHEN {q_col} IS NOT NULL AND {q_col} != '' THEN 1 ELSE 0 END)"
-
 
 
     def get_lakehouse_connection(self):
@@ -115,6 +155,37 @@ class ConnectorEngine:
                 global _jvm_available
                 _jvm_available = False
             raise
+    #db2test
+    def _get_db2_pyodbc_string(self):
+        """Build a pyodbc connection string for DB2 using available ODBC drivers."""
+        import pyodbc
+        conn = self.connection
+        host = conn.host or ''
+        port = conn.port or 50000
+        db = conn.database_name or ''
+        user = conn.username or ''
+        pwd = conn.get_password() or ''
+        available = pyodbc.drivers()
+        db2_driver = next((d for d in available if 'db2' in d.lower() or 'ibm' in d.lower()), None)
+        if not db2_driver:
+            db2_driver = 'IBM DB2 ODBC DRIVER'
+        return f"DRIVER={{{db2_driver}}};DATABASE={db};HOSTNAME={host};PORT={port};PROTOCOL=TCPIP;UID={user};PWD={pwd};"
+
+    def get_db2_pyodbc_connection(self):
+        """Get a native pyodbc connection for DB2 with string decoding configured."""
+        import pyodbc
+        odbc_string = self._get_db2_pyodbc_string()
+        conn = pyodbc.connect(odbc_string)
+        # Fix DB2 SQL type -99 (graphic/custom types decoding)
+        try:
+            conn.setdecoding(pyodbc.SQL_CHAR, encoding='utf-8')
+            conn.setdecoding(pyodbc.SQL_WCHAR, encoding='utf-8')
+            conn.setencoding(encoding='utf-8')
+        except Exception:
+            pass
+        return conn
+    #db2test
+    
 
     def get_engine(self):
         """Create and return a cached SQLAlchemy engine."""
@@ -260,7 +331,7 @@ class ConnectorEngine:
                     return [f'{catalog}_schema', 'default']
                 return ['hive_metastore', 'default', 'prod_catalog']
             elif self.connection.connection_type == 'db2':
-                return ['DB2INST1', 'SALES', 'PRODUCTION']
+                return ['DB2ADMIN', 'SAMPLEDB', 'DB2INST1', 'SALES', 'PRODUCTION']
             elif self.connection.connection_type == 'oracle':
                 return ['SYSTEM', 'HR', 'SCOTT']
             schemas = ['default', 'public', 'loan_target']
@@ -271,6 +342,7 @@ class ConnectorEngine:
         ctype = self.connection.connection_type
         cache_key = f"schemas:{self.connection.id}:{catalog or ''}"
         def fetch():
+            logger.info("entered fetch")
             try:
                 if ctype == 'lakehouse':
                     if catalog:
@@ -280,8 +352,59 @@ class ConnectorEngine:
                         query = "SHOW SCHEMAS"
                     df = self.execute_query(query)
                     return self._extract_first_column(df)
+                #db2test
+                if ctype == 'db2':
+                    logger.info("entered DB2 schema fetch")
+                    system_schemas = {'SYSCAT', 'SYSFUN', 'SYSIBM', 'SYSPROC', 'SYSSTAT', 'SYSTOOLS', 'SYSGPB', 'SYSIBMADM', 'SYSIBMINTERNAL', 'SYSIBMTS', 'SYSPUBLIC', 'NULLID', 'SQLJ', 'GSE'}
+                    try:
+                        import pandas as pd
+
+                        conn = self.get_db2_pyodbc_connection()
+                        
+                        df = pd.read_sql(
+                            """
+                            SELECT SCHEMANAME
+                            FROM SYSCAT.SCHEMATA
+                            ORDER BY SCHEMANAME
+                            """,
+                            conn
+                        )
+                        
+                        # logger.info("Rows: %s", len(df))
+                        # logger.info("Columns: %s", list(df.columns))
+                        # logger.info("\n%s", df.head(20).to_string())
+                        
+                        schemas = self._extract_first_column(df)
+                        
+                        # logger.info("Schemas: %s", schemas)
+                        
+                        return schemas
+                    
+                    except Exception as e:
+                        logger.exception("DB2 schema fetch failed: %s", e)
+                        return []
+                        
+                    # try:
+                    #     df = self.execute_query("SELECT DISTINCT SCHEMANAME FROM SYSCAT.SCHEMATA ORDER BY SCHEMANAME")
+                    #     schemas = self._extract_first_column(df)
+                    # except Exception as e:
+                    #     logger.warning(f"DB2 SYSCAT.SCHEMATA query failed, trying SYSIBM.SYSTABLES: {e}")
+                    #     try:
+                    #         df = self.execute_query("SELECT DISTINCT CREATOR FROM SYSIBM.SYSTABLES ORDER BY CREATOR")
+                    #         schemas = self._extract_first_column(df)
+                    #     except Exception as e2:
+                    #         logger.warning(f"DB2 SYSIBM.SYSTABLES query failed: {e2}")
+
+                    # if schemas:
+                    #     filtered = [s.strip() for s in schemas if s and s.strip().upper() not in system_schemas and not s.strip().upper().startswith('SYS')]
+                    #     if filtered:
+                    #         return filtered
+                    #     return schemas
+
+                    return [self.connection.username.upper() if self.connection.username else 'NULLID']
 
                 engine = self.get_engine()
+                # db2test
                 # Databricks — use SHOW SCHEMAS IN <catalog>
                 if ctype == 'databricks' and catalog:
                     quoted_catalog = self._quote_identifier(catalog)
@@ -298,22 +421,12 @@ class ConnectorEngine:
                         logger.warning(f"Oracle ALL_USERS query failed, falling back to inspector: {e}")
                         inspector = inspect(engine)
                         return inspector.get_schema_names()
-                # DB2 — fetch schemas
-                if ctype == 'db2':
-                    try:
-                        df = self.execute_query("SELECT DISTINCT SCHEMANAME FROM SYSCAT.SCHEMATA ORDER BY SCHEMANAME")
-                        return self._extract_first_column(df)
-                    except Exception as e:
-                        logger.warning(f"DB2 schema query failed: {e}")
-                # PostgreSQL / MySQL and all others — use SQLAlchemy inspector
-                inspector = inspect(engine)
-                schemas = inspector.get_schema_names()
-                return schemas
             except Exception as e:
                 logger.error(f"Error getting schemas: {e}")
                 return []
-        return get_cached_metadata(cache_key, fetch)
 
+        return get_cached_metadata(cache_key, fetch)
+                        
     def get_tables(self, schema=None, catalog=None):
         """Get list of tables from a schema (optionally within a catalog)."""
         if self.connection.is_file:
@@ -364,6 +477,7 @@ class ConnectorEngine:
                     return sorted(self._extract_table_names(df))
 
                 engine = self.get_engine()
+                
                 # Databricks — SHOW TABLES syntax
                 if ctype == 'databricks':
                     if catalog and schema:
@@ -410,14 +524,93 @@ class ConnectorEngine:
                         tables = inspector.get_table_names(schema=schema or None)
                         views = inspector.get_view_names(schema=schema or None)
                         return sorted(tables + views)
-                # All other databases — SQLAlchemy inspector
-                inspector = inspect(engine)
-                tables = inspector.get_table_names(schema=schema or None)
-                views = inspector.get_view_names(schema=schema or None)
-                return sorted(tables + views)
+                if ctype == 'db2':
+                    logger.info("testing!")
+                    sch = (schema or '').upper() or (self.connection.username or '').upper()
+                    logger.info(sch)
+                    
+                    # Try SYSCAT.TABLES (LUW)
+                    try:
+                        import pandas as pd
+                        conn = self.get_db2_pyodbc_connection()
+                    
+                        if sch:
+                            query = f"""
+                                SELECT TABNAME
+                                FROM SYSCAT.TABLES
+                                WHERE TABSCHEMA = '{sch}'
+                                  AND TYPE IN ('T','V')
+                                ORDER BY TABNAME
+                            """
+                        else:
+                            query = """
+                                SELECT TABNAME
+                                FROM SYSCAT.TABLES
+                                WHERE TABSCHEMA = CURRENT SCHEMA
+                                  AND TYPE IN ('T','V')
+                                ORDER BY TABNAME
+                            """
+                    
+                        df = pd.read_sql(query, conn)
+                    
+                        logger.info("Rows: %d", len(df))
+                        logger.info("Columns: %s", df.columns.tolist())
+                        logger.info("\n%s", df.to_string())
+                    
+                        tables = self._extract_first_column(df)
+                    
+                        logger.info("Tables: %s", tables)
+                    
+                        conn.close()
+                    
+                        if tables:
+                            return sorted(tables)
+                    
+                    except Exception as e:
+                        logger.exception(f"DB2 SYSCAT.TABLES query failed: {e}")
+                    # Try QSYS2.SYSTABLES (AS400)
+                    try:
+                        if sch:
+                            df = self.execute_query(
+                                f"SELECT TABLE_NAME FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA = '{sch}' ORDER BY TABLE_NAME"
+                            )
+                        else:
+                            df = self.execute_query(
+                                "SELECT TABLE_NAME FROM QSYS2.SYSTABLES WHERE TABLE_SCHEMA = CURRENT SCHEMA ORDER BY TABLE_NAME"
+                            )
+                        tables = self._extract_first_column(df)
+                        if tables:
+                            return sorted(tables)
+                    except Exception as e:
+                        logger.warning(f"DB2 QSYS2.SYSTABLES query failed: {e}")    
+                    inspector = inspect(engine)
+                    tables = inspector.get_table_names(schema=schema or None)
+                    views = inspector.get_view_names(schema=schema or None)
+                    return sorted(tables + views)
+                # db2test
+                # if ctype == 'db2':
+                #     sch = (schema or '').upper()
+                #     try:
+                #         if sch:
+                #             df = self.execute_query(
+                #                 f"SELECT TABNAME FROM SYSCAT.TABLES WHERE TABSCHEMA = '{sch}' AND TYPE IN ('T', 'V') ORDER BY TABNAME"
+                #             )
+                #         else:
+                #             df = self.execute_query(
+                #                 "SELECT TABNAME FROM SYSCAT.TABLES WHERE TYPE IN ('T', 'V') ORDER BY TABNAME"
+                #             )
+                #         tables = self._extract_first_column(df)
+                #         return sorted(tables) if tables else []
+                #     except Exception as e:
+                #         logger.warning(f"DB2 SYSCAT.TABLES query failed: {e}")
+                #         return []
+
+                engine = self.get_engine()
+                
             except Exception as e:
                 logger.error(f"Error getting tables: {e}")
                 return []
+            
         return get_cached_metadata(cache_key, fetch)
 
     def get_columns(self, schema=None, table=None, catalog=None):
@@ -492,6 +685,44 @@ class ConnectorEngine:
                                     'primary_key': False,
                                 })
                     return columns
+                if ctype == 'db2':
+                    tbl = (table or '').upper()
+                    sch = (schema or '').upper()
+                    try:
+                        if sch:
+                            query = (
+                                f"SELECT COLNAME, TYPENAME, NULLS, DEFAULT "
+                                f"FROM SYSCAT.COLUMNS "
+                                f"WHERE TABSCHEMA = '{sch}' AND TABNAME = '{tbl}' "
+                                f"ORDER BY COLNO"
+                            )
+                        else:
+                            query = (
+                                f"SELECT COLNAME, TYPENAME, NULLS, DEFAULT "
+                                f"FROM SYSCAT.COLUMNS "
+                                f"WHERE TABNAME = '{tbl}' "
+                                f"ORDER BY COLNO"
+                            )
+                        df = self.execute_query(query)
+                        result = []
+                        if df is not None and not df.empty:
+                            for row in df.itertuples(index=False):
+                                col_name = str(row[0]).strip()
+                                data_type = str(row[1]).strip() if len(row) > 1 else ''
+                                nullable = str(row[2]).strip() if len(row) > 2 else 'Y'
+                                default = str(row[3]).strip() if len(row) > 3 and row[3] is not None else None
+                                result.append({
+                                    'name': col_name,
+                                    'type': data_type,
+                                    'nullable': nullable != 'N',
+                                    'default': default,
+                                    'primary_key': False,
+                                    'family': get_canonical_family(data_type),
+                                })
+                            return result
+                    except Exception as e:
+                        logger.warning(f"DB2 SYSCAT.COLUMNS query failed: {e}")
+
 
                 engine = self.get_engine()
                 # Databricks — DESCRIBE TABLE
@@ -579,6 +810,112 @@ class ConnectorEngine:
                                 'primary_key': col.get('autoincrement', False),
                             })
                         return result
+                # if ctype == 'db2':
+                #     tbl = (table or '').upper()
+                #     sch = (schema or '').upper() or (self.connection.username or '').upper()
+                    
+                #     # Try SYSCAT.COLUMNS (LUW)
+                #     try:
+                #         if sch:
+                #             query = (
+                #                 f"SELECT COLNAME, TYPENAME, NULLS, DEFAULT "
+                #                 f"FROM SYSCAT.COLUMNS "
+                #                 f"WHERE TABSCHEMA = '{sch}' AND TABNAME = '{tbl}' "
+                #                 f"ORDER BY COLNO"
+                #             )
+                #         else:
+                #             query = (
+                #                 f"SELECT COLNAME, TYPENAME, NULLS, DEFAULT "
+                #                 f"FROM SYSCAT.COLUMNS "
+                #                 f"WHERE TABNAME = '{tbl}' "
+                #                 f"ORDER BY COLNO"
+                #             )
+                #         df = self.execute_query(query)
+                #         result = []
+                #         if df is not None and not df.empty:
+                #             for row in df.itertuples(index=False):
+                #                 col_name = str(row[0]).strip()
+                #                 data_type = str(row[1]).strip() if len(row) > 1 else ''
+                #                 nullable = str(row[2]).strip() if len(row) > 2 else 'Y'
+                #                 default = str(row[3]).strip() if len(row) > 3 and row[3] is not None else None
+                #                 result.append({
+                #                     'name': col_name,
+                #                     'type': data_type,
+                #                     'nullable': nullable != 'N',
+                #                     'default': default,
+                #                     'primary_key': False,
+                #                 })
+                #             return result
+                #     except Exception as e:
+                #         logger.warning(f"DB2 SYSCAT.COLUMNS query failed: {e}")
+                    # Try SYSIBM.SYSCOLUMNS (z/OS)
+                    try:
+                        if sch:
+                            query = (
+                                f"SELECT NAME, COLTYPE, NULLS, DEFAULT "
+                                f"FROM SYSIBM.SYSCOLUMNS "
+                                f"WHERE TBCREATOR = '{sch}' AND TBNAME = '{tbl}' "
+                                f"ORDER BY COLNO"
+                            )
+                        else:
+                            query = (
+                                f"SELECT NAME, COLTYPE, NULLS, DEFAULT "
+                                f"FROM SYSIBM.SYSCOLUMNS "
+                                f"WHERE TBNAME = '{tbl}' "
+                                f"ORDER BY COLNO"
+                            )
+                        df = self.execute_query(query)
+                        result = []
+                        if df is not None and not df.empty:
+                            for row in df.itertuples(index=False):
+                                col_name = str(row[0]).strip()
+                                data_type = str(row[1]).strip() if len(row) > 1 else ''
+                                nullable = str(row[2]).strip() if len(row) > 2 else 'Y'
+                                default = str(row[3]).strip() if len(row) > 3 and row[3] is not None else None
+                                result.append({
+                                    'name': col_name,
+                                    'type': data_type,
+                                    'nullable': nullable != 'N',
+                                    'default': default,
+                                    'primary_key': False,
+                                })
+                            return result
+                    except Exception as e:
+                        logger.warning(f"DB2 SYSIBM.SYSCOLUMNS query failed: {e}")
+                    # Try QSYS2.SYSCOLUMNS (AS400)
+                    try:
+                        if sch:
+                            query = (
+                                f"SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT "
+                                f"FROM QSYS2.SYSCOLUMNS "
+                                f"WHERE TABLE_SCHEMA = '{sch}' AND TABLE_NAME = '{tbl}' "
+                                f"ORDER BY ORDINAL_POSITION"
+                            )
+                        else:
+                            query = (
+                                f"SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT "
+                                f"FROM QSYS2.SYSCOLUMNS "
+                                f"WHERE TABLE_NAME = '{tbl}' "
+                                f"ORDER BY ORDINAL_POSITION"
+                            )
+                        df = self.execute_query(query)
+                        result = []
+                        if df is not None and not df.empty:
+                            for row in df.itertuples(index=False):
+                                col_name = str(row[0]).strip()
+                                data_type = str(row[1]).strip() if len(row) > 1 else ''
+                                nullable = str(row[2]).strip() if len(row) > 2 else 'YES'
+                                default = str(row[3]).strip() if len(row) > 3 and row[3] is not None else None
+                                result.append({
+                                    'name': col_name,
+                                    'type': data_type,
+                                    'nullable': nullable.upper() not in ('N', 'NO'),
+                                    'default': default,
+                                    'primary_key': False,
+                                })
+                            return result
+                    except Exception as e:
+                        logger.warning(f"DB2 QSYS2.SYSCOLUMNS query failed: {e}")
 
                 # All other databases — SQLAlchemy inspector
                 inspector = inspect(engine)
@@ -641,22 +978,8 @@ class ConnectorEngine:
             return '2025-12-31'
         elif op_lower == 'length_sum_check' or op_lower == 'sum_length':
             return 15000
-        elif op_lower == 'regex_check':
-            return 1250
         elif op_lower == 'unique_check':
             return 1250
-        elif op_lower == 'range_check':
-            return 1250
-        elif op_lower == 'equals_check':
-            return 'mock_value'
-        elif op_lower == 'starts_with_check':
-            return 0
-        elif op_lower == 'ends_with_check':
-            return 0
-        elif op_lower == 'pattern_match':
-            return 0
-        elif op_lower == 'equals':
-            return 75000
         elif op_lower == 'std_dev':
             return 2.5
         elif op_lower == 'variance':
@@ -665,6 +988,8 @@ class ConnectorEngine:
             return 250.0
         elif op_lower == 'mode':
             return 250.0
+        elif op_lower == 'pattern_match':
+            return 0
         return 1250
 
     def test_connection(self):
@@ -693,7 +1018,14 @@ class ConnectorEngine:
                                 conn.close()
                             except Exception:
                                 pass
-
+                    if self.connection.connection_type == 'db2':
+                        conn = self.get_db2_pyodbc_connection()
+                        curs = conn.cursor()
+                        curs.execute("SELECT 1 FROM SYSIBM.SYSDUMMY1")
+                        curs.fetchone()
+                        curs.close()
+                        conn.close()
+                        return True, "Connection successful"
                     engine = self.get_engine()
                     with engine.connect() as conn:
                         if engine.dialect.name == "oracle":
@@ -876,7 +1208,6 @@ class ConnectorEngine:
             return pd.DataFrame()
         start_time = time.time()
         try:
-            # Clean ISO-8601 'T' format out of any date parameters for all connections
             if params and isinstance(params, dict):
                 cleaned_params = {}
                 for k, val in params.items():
@@ -905,7 +1236,6 @@ class ConnectorEngine:
                         
                         query = pattern.sub(replace_placeholder, query)
                         params = positional_params
-                        
                     df = pd.read_sql(query, conn, params=params)
                 finally:
                     try:
@@ -986,14 +1316,19 @@ class ConnectorEngine:
         conditions = []
         if date_column:
             q_date_col = self._quote_identifier(date_column)
+            wrapped_date_col = self._wrap_date_column(q_date_col, date_start)
             if date_operator:
                 if date_start:
-                    conditions.append(f'{q_date_col} {date_operator} :date_start')
+                    wrapped_start = self._wrap_date_placeholder(':date_start', date_start)
+                    conditions.append(f'{wrapped_date_col} {date_operator} {wrapped_start}')
             else:
                 if date_start:
-                    conditions.append(f'{q_date_col} {date_operator_start} :date_start')
+                    wrapped_start = self._wrap_date_placeholder(':date_start', date_start)
+                    conditions.append(f'{wrapped_date_col} {date_operator_start} {wrapped_start}')
                 if date_end:
-                    conditions.append(f'{q_date_col} {date_operator_end} :date_end')
+                    wrapped_end = self._wrap_date_placeholder(':date_end', date_end) 
+                    wrapped_date_col_end = self._wrap_date_column(q_date_col, date_end or date_start)
+                    conditions.append(f'{wrapped_date_col_end} {date_operator_end} {wrapped_end}')
         
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
@@ -1042,15 +1377,11 @@ class ConnectorEngine:
                     conditions.append(f'{q_date_col} {date_operator_start} :date_start')
                 if date_end:
                     conditions.append(f'{q_date_col} {date_operator_end} :date_end')
-
         where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
-
         t = str(self.connection.connection_type).lower()
-
         # Database-specific SQL expressions for new operations
         std_expr = f"STDDEV({q_col})"
         var_expr = f"VARIANCE({q_col})"
-
         if t == 'postgresql':
             median_expr = f"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {q_col})"
         elif t == 'oracle' or t == 'db2':
@@ -1059,7 +1390,6 @@ class ConnectorEngine:
             median_expr = f"PERCENTILE({q_col}, 0.5)"
         else:
             median_expr = f"(SELECT AVG(val) FROM (SELECT {q_col} AS val, ROW_NUMBER() OVER (ORDER BY {q_col}) AS row_num, COUNT(*) OVER () AS total_count FROM {full_table}{where_clause}) AS t WHERE row_num IN (FLOOR((total_count+1)/2), CEIL((total_count+1)/2)))"
-
         if t == 'postgresql':
             mode_expr = f"MODE() WITHIN GROUP (ORDER BY {q_col})"
         elif t == 'oracle':
@@ -1069,6 +1399,28 @@ class ConnectorEngine:
         else:
             and_cond_str = " AND " + " AND ".join(conditions) if conditions else ""
             mode_expr = f"(SELECT {q_col} FROM {full_table} WHERE {q_col} IS NOT NULL {and_cond_str} GROUP BY {q_col} ORDER BY COUNT(*) DESC LIMIT 1)"
+         # Check if timestamp is chosen
+        include_timestamp = False
+        for dt_val in (date_start, date_end):
+            if dt_val:
+                dt_str = str(dt_val)
+                if ':' in dt_str or 'T' in dt_str or (' ' in dt_str and len(dt_str) > 10):
+                    include_timestamp = True
+                    break
+        db_type = str(self.connection.connection_type).lower()
+        if not include_timestamp:
+            if db_type == 'oracle':
+                min_expr = f"TO_CHAR(MIN({q_col}), 'YYYY-MM-DD')"
+                max_expr = f"TO_CHAR(MAX({q_col}), 'YYYY-MM-DD')"
+            elif db_type in ('lakehouse', 'databricks', 'postgresql', 'db2', 'mysql', 'mssql', 'sqlserver'):
+                min_expr = f"CAST(MIN({q_col}) AS DATE)"
+                max_expr = f"CAST(MAX({q_col}) AS DATE)"
+            else:
+                min_expr = f"MIN({q_col})"
+                max_expr = f"MAX({q_col})"
+        else:
+            min_expr = f"MIN({q_col})"
+            max_expr = f"MAX({q_col})"
 
         op_map = {
             'count': f'COUNT({q_col})',
@@ -1079,17 +1431,13 @@ class ConnectorEngine:
             'distinct_count': f'COUNT(DISTINCT {q_col})',
             'null_check': f'SUM(CASE WHEN {q_col} IS NULL THEN 1 ELSE 0 END)',
             'row_count': 'COUNT(*)',
-            'min_date': f'MIN({q_col})',
-            'max_date': f'MAX({q_col})',
+            'min_date': min_expr,
+            'max_date': max_expr,
             'length_sum_check': f'SUM(LENGTH({q_col}))',
             'sum_length': f'SUM(LENGTH({q_col}))',
-            'regex_check': f'SUM(CASE WHEN {q_col} IS NOT NULL AND {q_col} != \'\' THEN 1 ELSE 0 END)',
             'unique_check': f'COUNT(DISTINCT {q_col})',
-            'range_check': f'SUM(CASE WHEN {q_col} >= 0 THEN 1 ELSE 0 END)',
-            'equals': f'SUM({q_col})',
-            'equals_check': f'MIN({q_col})',
-            'starts_with_check': f'SUM(CASE WHEN {q_col} IS NOT NULL AND SUBSTR({q_col}, 1, 1) BETWEEN \'A\' AND \'z\' THEN 1 ELSE 0 END)',
-            'ends_with_check': f'SUM(CASE WHEN {q_col} IS NOT NULL AND SUBSTR({q_col}, LENGTH({q_col}), 1) BETWEEN \'A\' AND \'z\' THEN 1 ELSE 0 END)',
+
+            
             'pattern_match': self._pattern_match_sql(q_col),
             'std_dev': std_expr,
             'variance': var_expr,
@@ -1099,6 +1447,24 @@ class ConnectorEngine:
 
         agg_expr = op_map.get(operation, f'COUNT({q_col})')
         query = f"SELECT {agg_expr} AS result FROM {full_table}"
+
+        # Add date filter
+        conditions = []
+        if date_column:
+            q_date_col = self._quote_identifier(date_column)
+            wrapped_date_col = self._wrap_date_column(q_date_col, date_start)
+            if date_operator:
+                if date_start:
+                    wrapped_start = self._wrap_date_placeholder(':date_start', date_start)
+                    conditions.append(f'{wrapped_date_col} {date_operator} {wrapped_start}')
+            else:
+                if date_start:
+                    wrapped_start = self._wrap_date_placeholder(':date_start', date_start)
+                    conditions.append(f'{wrapped_date_col} {date_operator_start} {wrapped_start}')
+                if date_end:
+                    wrapped_end = self._wrap_date_placeholder(':date_end', date_end)
+                    wrapped_date_col_end = self._wrap_date_column(q_date_col, date_end or date_start)
+                    conditions.append(f'{wrapped_date_col_end} {date_operator_end} {wrapped_end}')
 
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
@@ -1176,13 +1542,10 @@ class ConnectorEngine:
                 'max_date': lambda: str(col.max()) if not col.empty else None,
                 'length_sum_check': lambda: col.astype(str).str.len().sum(),
                 'sum_length': lambda: col.astype(str).str.len().sum(),
-                'regex_check': lambda: col.astype(str).str.match(r'^[a-zA-Z0-9_\-\.\s@]+$').sum(),
+                
                 'unique_check': lambda: col.nunique(),
                 'range_check': lambda: (col >= 0).sum() if pd.api.types.is_numeric_dtype(col) else len(col),
-                'equals': lambda: col.sum(),
-                'equals_check': lambda: col.min() if not col.empty else None,
-                'starts_with_check': lambda: col.astype(str).str.slice(0, 1).str.isalpha().sum(),
-                'ends_with_check': lambda: col.astype(str).str.slice(-1).str.isalpha().sum(),
+                
                 'pattern_match': lambda: col.astype(str).str.match(r'^[a-zA-Z0-9_\-\.\s@]+$').sum(),
                 'std_dev': lambda: col.std() if len(col.dropna()) > 1 else 0.0,
                 'variance': lambda: col.var() if len(col.dropna()) > 1 else 0.0,
@@ -1201,8 +1564,7 @@ class ConnectorEngine:
             logger.error(f"File aggregation error: {e}")
         return None
 
-
-
+    
     def check_duplicates(self, schema, table, column, catalog=None, date_column=None, date_start=None, date_end=None, date_operator=None, date_operator_start='>=', date_operator_end='<='):
         """Check for duplicate values in a column with optional date filtering."""
         if self.is_mocked():
@@ -1221,13 +1583,18 @@ class ConnectorEngine:
         conditions = []
         if date_column:
             q_date_col = self._quote_identifier(date_column)
+            wrapped_date_col = self._wrap_date_column(q_date_col, date_start)
             if date_operator:
-                conditions.append(f'{q_date_col} {date_operator} :date_start')
+                wrapped_start = self._wrap_date_placeholder(':date_start', date_start)
+                conditions.append(f'{wrapped_date_col} {date_operator} {wrapped_start}')
             else:
                 if date_start:
-                    conditions.append(f'{q_date_col} {date_operator_start} :date_start')
+                    wrapped_start = self._wrap_date_placeholder(':date_start', date_start)
+                    conditions.append(f'{wrapped_date_col} {date_operator_start} {wrapped_start}')
                 if date_end:
-                    conditions.append(f'{q_date_col} {date_operator_end} :date_end')
+                    wrapped_end = self._wrap_date_placeholder(':date_end', date_end)
+                    wrapped_date_col_end = self._wrap_date_column(q_date_col, date_end or date_start)
+                    conditions.append(f'{wrapped_date_col_end} {date_operator_end} {wrapped_end}')
 
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
@@ -1305,4 +1672,5 @@ class ConnectorEngine:
                 return df.iloc[offset:offset+limit] if df is not None else None
             except Exception as ex:
                 logger.error(f"Error getting database preview: {ex}")
-                return None
+                return None 
+ 

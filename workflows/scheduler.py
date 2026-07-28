@@ -74,12 +74,7 @@ def calculate_next_run(workflow, after_time=None):
                 next_dt = timezone.make_aware(datetime.combine(date(year, month, last_day), scheduled_time), tz)
         return next_dt
         
-    elif workflow.schedule_type == 'db_trigger':
-        scheduled_time = workflow.trigger_scheduled_time or dt_time(8, 0)
-        next_dt = timezone.make_aware(datetime.combine(local_after.date(), scheduled_time), tz)
-        if next_dt <= local_after:
-            next_dt += timedelta(days=1)
-        return next_dt
+
         
     return None
 
@@ -89,7 +84,7 @@ def run_due_workflows():
     Check for and execute any active workflows whose scheduled next run time is in the past.
     """
     from .models import Workflow
-    from .tasks import execute_workflow_task, start_db_trigger_polling
+    from .tasks import execute_workflow_task
 
     now = timezone.now()
     
@@ -118,22 +113,13 @@ def run_due_workflows():
         workflow.save(update_fields=['next_run', 'last_run'])
         
         # Spawn thread to run the celery task to avoid blocking the main scheduler loop
-        if workflow.schedule_type == 'db_trigger':
-            t = threading.Thread(
-                target=start_db_trigger_polling.delay,
-                args=[workflow.id],
-                daemon=True,
-                name=f"WorkflowTrigger-{workflow.id}"
-            )
-            t.start()
-        else:
-            t = threading.Thread(
-                target=execute_workflow_task.delay,
-                args=[workflow.id, 'scheduled'],
-                daemon=True,
-                name=f"WorkflowRun-{workflow.id}"
-            )
-            t.start()
+        t = threading.Thread(
+            target=execute_workflow_task.delay,
+            args=[workflow.id, 'scheduled'],
+            daemon=True,
+            name=f"WorkflowRun-{workflow.id}"
+        )
+        t.start()
 
 
 def scheduler_loop():

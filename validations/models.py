@@ -101,6 +101,15 @@ class ValidationRun(models.Model):
             return 0
         return round((self.passed_checks / self.total_checks) * 100, 1)
 
+    @property
+    def monitor_run_number(self):
+        """Dynamic monitor run sequence number matching Monitor list view."""
+        if hasattr(self, 'rev_index') and self.rev_index is not None:
+            return self.rev_index
+        total_count = ValidationRun.objects.count()
+        runs_after = ValidationRun.objects.filter(id__gt=self.id).count()
+        return total_count - runs_after
+
 
 class ValidationResult(models.Model):
     """Individual result for each column-operation check in a validation run."""

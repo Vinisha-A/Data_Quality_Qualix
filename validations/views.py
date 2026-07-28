@@ -60,6 +60,11 @@ def validation_report_view(request, run_id):
         ValidationRun.objects.select_related('mapping', 'triggered_by'),
         id=run_id
     )
+    # Calculate dynamic monitor run number matching Monitor list view
+    total_count = ValidationRun.objects.count()
+    runs_after = ValidationRun.objects.filter(id__gt=run.id).count()
+    run.rev_index = total_count - runs_after
+
     results = run.results.select_related('column_mapping').all()
     return render(request, 'validations/report.html', {
         'run': run,
@@ -601,7 +606,12 @@ def pipeline_monitor_history_view(request, mapping_id):
         Mapping.objects.select_related('source_connection', 'target_connection', 'created_by'),
         id=mapping_id
     )
-    runs = mapping.validation_runs.select_related('triggered_by').all().order_by('-created_at')
+    runs = list(mapping.validation_runs.select_related('triggered_by').all().order_by('-created_at'))
+    total_count = ValidationRun.objects.count()
+    for run in runs:
+        runs_after = ValidationRun.objects.filter(id__gt=run.id).count()
+        run.rev_index = total_count - runs_after
+
     return render(request, 'validations/pipeline_history.html', {
         'mapping': mapping,
         'runs': runs,
@@ -641,7 +651,16 @@ def api_send_report_email(request, run_id):
         if notification and notification.sent_status == 'success':
             return JsonResponse({'success': True, 'message': f'Report email successfully sent to {email}'})
         else:
-            err = notification.error_message if notification else 'Unknown error'
+            err = 'Unknown error'
+            if notification:
+                err = notification.error_message
+                is_none_err = (
+                    not err or 
+                    str(err).strip().lower() in ('none', '', '(none, none)', 'none, none', '(none,)', 'none,', '("none", "none")') or
+                    ('none' in str(err).strip().lower() and ('(' in str(err) or ',' in str(err)))
+                )
+                if is_none_err:
+                    err = "SMTP/Connection Error: Connection to the mail server failed. Please check your SMTP settings in settings.py / .env and VDI network permissions."
             return JsonResponse({'success': False, 'error': f'Failed to send email: {err}'})
     except Exception as e:
         logger.error(f"Error sending manual email: {e}")

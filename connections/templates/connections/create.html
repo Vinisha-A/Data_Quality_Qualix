@@ -226,6 +226,16 @@ document.addEventListener('DOMContentLoaded', function() {
             dbFields.style.display = 'block';
             fileFields.style.display = 'none';
 
+            // Show driver field for db2, hide for postgresql/mysql
+            if (val === 'db2') {
+                if (groupDriver) groupDriver.style.display = 'block';
+                if (driverInput) {
+                    driverInput.placeholder = 'e.g., ibm_db or pyodbc;DRIVER={IBM DB2}';
+                }
+            } else {
+                if (groupDriver) groupDriver.style.display = 'none';
+            }
+
             labelHost.textContent = 'Host *';
             labelPort.textContent = 'Port';
             labelDatabaseName.textContent = 'Database *';

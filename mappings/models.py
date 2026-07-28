@@ -59,6 +59,7 @@ class Mapping(models.Model):
     # Metadata
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='mappings')
     created_at = models.DateTimeField(auto_now_add=True)
+    modified_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='modified_mappings')
     updated_at = models.DateTimeField(auto_now=True)
     is_active = models.BooleanField(default=True)
     is_draft = models.BooleanField(default=False)
@@ -127,3 +128,25 @@ class ValidationRule(models.Model):
 
     def __str__(self):
         return f"{self.column_mapping} — {self.get_operation_display()}"
+
+
+class PipelineGroup(models.Model):
+    """User-defined groups for categorizing pipelines."""
+    name = models.CharField(max_length=100, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.name
+
+
+class PipelineGroupAssignment(models.Model):
+    """Assigns a pipeline (Mapping) to a custom PipelineGroup."""
+    group = models.ForeignKey(PipelineGroup, on_delete=models.CASCADE, related_name='assignments')
+    mapping = models.OneToOneField(Mapping, on_delete=models.CASCADE, related_name='group_assignment')
+    assigned_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.mapping.name} -> {self.group.name}"
+
+
+

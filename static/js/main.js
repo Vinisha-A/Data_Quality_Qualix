@@ -1343,6 +1343,11 @@ async function restoreMappingDraft(data) {
                 toggleTimeFormat(prefix);
             }
 
+            const singleOpSelect = document.getElementById(`${prefix}-date-operator`);
+            if (singleOpSelect) {
+                singleOpSelect.value = data[`${prefix}_date_operator`] || '=';
+            }
+
             const singleInput = document.getElementById(`${prefix}-date-single`);
             if (singleInput) {
                 singleInput.value = dateSingle;

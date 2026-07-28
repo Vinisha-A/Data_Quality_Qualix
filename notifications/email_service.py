@@ -109,7 +109,15 @@ def send_validation_email(run, workflow=None, recipient_email=None):
         
     except Exception as e:
         notification.sent_status = 'failed'
-        notification.error_message = str(e)
+        err_msg = str(e).strip()
+        is_none_err = (
+            not err_msg or 
+            err_msg.lower() in ('none', '', '(none, none)', 'none, none', '(none,)', 'none,', '("none", "none")') or
+            ('none' in err_msg.lower() and ('(' in err_msg or ',' in err_msg))
+        )
+        if is_none_err:
+            err_msg = f"SMTP/Connection Error ({type(e).__name__}): Connection to the mail server failed. Please check your SMTP settings in settings.py / .env and VDI network permissions."
+        notification.error_message = err_msg
         notification.save()
         logger.error(f"Failed sending validation email to {recipient_email} for ValidationRun {run.id}: {e}")
 

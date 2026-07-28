@@ -123,7 +123,7 @@
                 <tbody>
                     {% for run in runs %}
                     <tr>
-                        <td class="fw-600">{{ forloop.revcounter }}</td>
+                        <td class="fw-600">{{ run.rev_index|default:run.monitor_run_number }}</td>
                         <td>
                             <span class="badge badge-dot {% if run.status == 'completed' %}badge-success{% elif run.status == 'failed' %}badge-danger{% elif run.status == 'running' %}badge-warning{% else %}badge-muted{% endif %}"
                                   id="status-badge-{{ run.id }}">

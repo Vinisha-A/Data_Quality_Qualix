@@ -32,28 +32,6 @@ def workflow_create_view(request):
             selected_cols = request.POST.getlist('selected_columns')
             selected_columns_str = ",".join(selected_cols)
 
-            # ── DB Trigger fields ─────────────────────────────────────────────
-            trigger_name = ''
-            trigger_scheduled_time = None
-            poll_duration_hours = 3
-
-            if schedule_type == 'db_trigger':
-                trigger_name = request.POST.get('trigger_name', '').strip()
-                trigger_scheduled_time = request.POST.get('trigger_scheduled_time') or None
-                try:
-                    poll_duration_hours = int(request.POST.get('poll_duration_hours', 3))
-                    if poll_duration_hours < 1:
-                        poll_duration_hours = 1
-                except (ValueError, TypeError):
-                    poll_duration_hours = 3
-
-                if not trigger_name:
-                    messages.error(request, 'Trigger Name is required for DB Trigger schedule.')
-                    return render(request, 'workflows/create.html', {'mappings': mappings})
-                if not trigger_scheduled_time:
-                    messages.error(request, 'Scheduled Time is required for DB Trigger schedule.')
-                    return render(request, 'workflows/create.html', {'mappings': mappings})
-
             workflow = Workflow.objects.create(
                 name=request.POST.get('name', ''),
                 description=request.POST.get('description', ''),
@@ -62,11 +40,6 @@ def workflow_create_view(request):
                 schedule_time=request.POST.get('schedule_time') or None,
                 schedule_day=request.POST.get('schedule_day') or None,
                 cron_expression=request.POST.get('cron_expression', ''),
-                # DB Trigger
-                trigger_name=trigger_name,
-                trigger_scheduled_time=trigger_scheduled_time,
-                poll_duration_hours=poll_duration_hours,
-                trigger_status='idle',
                 selected_columns=selected_columns_str,
                 recipient_email=request.POST.get('recipient_email', '').strip() or None,
                 created_by=request.user,
@@ -85,7 +58,6 @@ def workflow_create_view(request):
                     entity_id=workflow.id,
                     details={
                         'schedule': workflow.schedule_type,
-                        'trigger_name': workflow.trigger_name or None,
                     },
                     ip_address=request.META.get('REMOTE_ADDR'),
                     level='info',
@@ -124,32 +96,6 @@ def workflow_edit_view(request, workflow_id):
             selected_cols = request.POST.getlist('selected_columns')
             selected_columns_str = ",".join(selected_cols)
 
-            # ── DB Trigger fields ─────────────────────────────────────────────
-            trigger_name = ''
-            trigger_scheduled_time = None
-            poll_duration_hours = 3
-
-            if schedule_type == 'db_trigger':
-                trigger_name = request.POST.get('trigger_name', '').strip()
-                trigger_scheduled_time = request.POST.get('trigger_scheduled_time') or None
-                try:
-                    poll_duration_hours = int(request.POST.get('poll_duration_hours', 3))
-                    if poll_duration_hours < 1:
-                        poll_duration_hours = 1
-                except (ValueError, TypeError):
-                    poll_duration_hours = 3
-
-                if not trigger_name:
-                    messages.error(request, 'Trigger Name is required for DB Trigger schedule.')
-                    return render(request, 'workflows/edit.html', {
-                        'workflow': workflow, 'mappings': mappings, 'is_edit': True
-                    })
-                if not trigger_scheduled_time:
-                    messages.error(request, 'Scheduled Time is required for DB Trigger schedule.')
-                    return render(request, 'workflows/edit.html', {
-                        'workflow': workflow, 'mappings': mappings, 'is_edit': True
-                    })
-
             workflow.name = request.POST.get('name', '').strip()
             workflow.description = request.POST.get('description', '')
             workflow.mapping_id = request.POST.get('mapping')
@@ -157,9 +103,6 @@ def workflow_edit_view(request, workflow_id):
             workflow.schedule_time = request.POST.get('schedule_time') or None
             workflow.schedule_day = request.POST.get('schedule_day') or None
             workflow.cron_expression = request.POST.get('cron_expression', '')
-            workflow.trigger_name = trigger_name
-            workflow.trigger_scheduled_time = trigger_scheduled_time
-            workflow.poll_duration_hours = poll_duration_hours
             workflow.selected_columns = selected_columns_str
             workflow.recipient_email = request.POST.get('recipient_email', '').strip() or None
             workflow.save()
@@ -243,17 +186,7 @@ def _register_celery_schedule(workflow):
             task_fn = 'workflows.tasks.execute_workflow_task'
             task_args = json.dumps([workflow.id])
 
-        elif workflow.schedule_type == 'db_trigger':
-            # Celery Beat fires start_db_trigger_polling daily at trigger_scheduled_time
-            t = workflow.trigger_scheduled_time
-            hour = t.hour if t else 0
-            minute = t.minute if t else 0
-            crontab, _ = CrontabSchedule.objects.get_or_create(
-                minute=str(minute), hour=str(hour),
-                day_of_week='*', day_of_month='*', month_of_year='*',
-            )
-            task_fn = 'workflows.tasks.start_db_trigger_polling'
-            task_args = json.dumps([workflow.id])
+
 
         elif workflow.schedule_type == 'custom_cron' and workflow.cron_expression:
             parts = workflow.cron_expression.split()
@@ -359,37 +292,7 @@ def api_toggle_workflow(request, workflow_id):
     return JsonResponse({'success': True, 'is_active': workflow.is_active})
 
 
-@login_required
-def api_trigger_status(request, workflow_id):
-    """Return current DB Trigger status for a workflow."""
-    workflow = get_object_or_404(Workflow, id=workflow_id)
-    return JsonResponse({
-        'trigger_status': workflow.trigger_status,
-        'trigger_status_display': workflow.get_trigger_status_display(),
-        'trigger_name': workflow.trigger_name,
-        'poll_duration_hours': workflow.poll_duration_hours,
-        'trigger_last_polled': workflow.trigger_last_polled.isoformat() if workflow.trigger_last_polled else None,
-        'trigger_fired_at': workflow.trigger_fired_at.isoformat() if workflow.trigger_fired_at else None,
-    })
 
-
-@login_required
-@contributor_or_admin_required
-@require_POST
-def api_start_db_trigger(request, workflow_id):
-    """Manually start DB Trigger polling for a workflow (for testing / on-demand)."""
-    if hasattr(request.user, 'profile') and request.user.profile.role == 'auditor':
-        return JsonResponse({'success': False, 'error': 'Permission denied.'}, status=403)
-    workflow = get_object_or_404(Workflow, id=workflow_id)
-    if workflow.schedule_type != 'db_trigger':
-        return JsonResponse({'success': False, 'error': 'Not a DB Trigger workflow.'}, status=400)
-
-    try:
-        from .tasks import start_db_trigger_polling
-        start_db_trigger_polling.delay(workflow_id)
-        return JsonResponse({'success': True, 'message': 'Polling started.'})
-    except Exception as e:
-        return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
 
 @login_required

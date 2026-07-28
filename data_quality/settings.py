@@ -66,6 +66,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
                 'accounts.context_processors.user_profile_context',
+                'mappings.context_processors.pipeline_groups_context',
             ],
         },
     },

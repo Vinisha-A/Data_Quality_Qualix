@@ -109,7 +109,38 @@ class DataConnection(models.Model):
                 f"?http_path={self.database_name}"
             )
         elif self.connection_type == 'db2':
-            return f"db2+ibm_db://{encoded_username}:{encoded_password}@{self.host}:{self.port or 50000}/{self.database_name}"
+            driver = self.driver.strip() if self.driver else 'ibm_db'
+            if 'pyodbc' in driver.lower():
+                driver_name = "IBM DB2"
+                # If odbc attributes are added in the driver input, parse them (e.g. pyodbc;DRIVER={IBM DB2})
+                parts = driver.split(';')
+                for part in parts:
+                    if part.upper().startswith('DRIVER='):
+                        driver_name = part.split('=', 1)[1].strip()
+                        if driver_name.startswith('{') and driver_name.endswith('}'):
+                            driver_name = driver_name[1:-1]
+                
+                # Wrap custom driver name in curly braces unless it's a direct library path (.so or .dll)
+                if '/' in driver_name or '.so' in driver_name or '.dll' in driver_name or driver_name.startswith('{'):
+                    pass
+                else:
+                    driver_name = f"{{{driver_name}}}"
+                
+                odbc_conn_str = (
+                    f"DRIVER={driver_name};"
+                    f"HOSTNAME={self.host};"
+                    f"PORT={self.port or 50000};"
+                    f"DATABASE={self.database_name};"
+                    f"PROTOCOL=TCPIP;"
+                    f"UID={self.username};"
+                    f"PWD={self.get_password()};"
+                )
+                quoted_odbc = urllib.parse.quote_plus(odbc_conn_str)
+                return f"db2+pyodbc:///?odbc_connect={quoted_odbc}"
+            elif driver.lower() in ('ibm_db', 'ibm_db_sa', 'db2', ''):
+                return f"db2://{encoded_username}:{encoded_password}@{self.host}:{self.port or 50000}/{self.database_name}"
+            else:
+                return f"db2+{driver}://{encoded_username}:{encoded_password}@{self.host}:{self.port or 50000}/{self.database_name}"
         elif self.connection_type == 'oracle':
             driver = self.driver.strip() if self.driver else 'oracledb'
             return f"oracle+{driver}://{encoded_username}:{encoded_password}@{self.host}:{self.port or 1521}/{self.database_name}"

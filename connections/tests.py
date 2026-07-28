@@ -221,6 +221,43 @@ class ConnectionViewsTestCase(TestCase):
         col_names = [col['name'] for col in data['columns']]
         self.assertIn('customer_id', col_names)
 
+    def test_db2_schemas_endpoint(self):
+        self.client.login(username='testuser', password='password123')
+        db2_conn = DataConnection.objects.create(
+            name='DB2 Mock Connection',
+            connection_type='db2',
+            host='dummy-db2-host',
+            database_name='SAMPLEDB',
+            username='db2admin',
+            created_by=self.user
+        )
+
+        response = self.client.get(reverse('connections:api_schemas'), {'connection_id': db2_conn.id})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('schemas', data)
+        self.assertFalse(data['is_file'])
+        self.assertIn('DB2ADMIN', data['schemas'])
+        self.assertIn('SAMPLEDB', data['schemas'])
+        self.assertIn('DB2INST1', data['schemas'])
+
+    def test_db2_tables_endpoint(self):
+        self.client.login(username='testuser', password='password123')
+        db2_conn = DataConnection.objects.create(
+            name='DB2 Mock Connection',
+            connection_type='db2',
+            host='dummy-db2-host',
+            database_name='SAMPLEDB',
+            username='db2admin',
+            created_by=self.user
+        )
+
+        response = self.client.get(reverse('connections:api_tables'), {'connection_id': db2_conn.id, 'schema': 'DB2ADMIN'})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('tables', data)
+        self.assertIn('customers', data['tables'])
+
     def test_excel_and_text_connection_lifecycle(self):
         import os
         import tempfile
@@ -370,5 +407,63 @@ class ConnectionViewsTestCase(TestCase):
             expected_params = ['2026-01-01', '2026-01-10 14:30']
 
             mock_read_sql.assert_called_once_with(expected_query, mock_conn, params=expected_params)
+
+    def test_db2_odbc_connection_string_generation(self):
+        import urllib.parse
+        # 1. Test standard default pyodbc driver
+        conn_db2 = DataConnection.objects.create(
+            name='Test DB2 ODBC',
+            connection_type='db2',
+            host='db2-host',
+            port=50001,
+            database_name='db2_db',
+            username='db2user',
+            driver='pyodbc',
+            created_by=self.user
+        )
+        conn_db2.set_password('db2pass')
+        conn_str = conn_db2.get_connection_string()
+        self.assertIn('db2+pyodbc:///?odbc_connect=', conn_str)
+        # Verify it contains URL-encoded driver name {IBM DB2}
+        decoded = urllib.parse.unquote_plus(conn_str)
+        self.assertIn('DRIVER={IBM DB2}', decoded)
+        self.assertIn('HOSTNAME=db2-host', decoded)
+        self.assertIn('PORT=50001', decoded)
+        self.assertIn('DATABASE=db2_db', decoded)
+        self.assertIn('UID=db2user', decoded)
+        self.assertIn('PWD=db2pass', decoded)
+
+        # 2. Test custom DRIVER parameter in driver field
+        conn_db2_custom = DataConnection.objects.create(
+            name='Test DB2 Custom ODBC',
+            connection_type='db2',
+            host='db2-host-2',
+            port=50002,
+            database_name='db2_db_2',
+            username='db2user2',
+            driver='pyodbc;DRIVER={IBM DB2_64}',
+            created_by=self.user
+        )
+        conn_db2_custom.set_password('db2pass2')
+        conn_str_custom = conn_db2_custom.get_connection_string()
+        decoded_custom = urllib.parse.unquote_plus(conn_str_custom)
+        self.assertIn('DRIVER={IBM DB2_64}', decoded_custom)
+        self.assertIn('HOSTNAME=db2-host-2', decoded_custom)
+
+        # 3. Test direct file path driver (no curly braces)
+        conn_db2_path = DataConnection.objects.create(
+            name='Test DB2 Path ODBC',
+            connection_type='db2',
+            host='db2-host-3',
+            port=50003,
+            database_name='db2_db_3',
+            username='db2user3',
+            driver='pyodbc;DRIVER=/usr/lib/db2/odbc_cli/clidriver/lib/libdb2o.so',
+            created_by=self.user
+        )
+        conn_db2_path.set_password('db2pass3')
+        conn_str_path = conn_db2_path.get_connection_string()
+        decoded_path = urllib.parse.unquote_plus(conn_str_path)
+        self.assertIn('DRIVER=/usr/lib/db2/odbc_cli/clidriver/lib/libdb2o.so', decoded_path)
 
 

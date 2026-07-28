@@ -273,7 +273,7 @@ class ValidationWorkspaceEnhancementsTestCase(TestCase):
             created_by=self.user
         )
         mapping_mismatch = Mapping.objects.create(
-            name='Other Pipeline',
+            name='Mismatched Pipeline',
             source_connection=self.source_conn,
             target_connection=self.target_conn,
             created_by=self.user
@@ -294,13 +294,13 @@ class ValidationWorkspaceEnhancementsTestCase(TestCase):
         response = self.client.get(reverse('validations:list') + '?query=Searchable')
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'My Searchable Pipeline')
-        self.assertNotContains(response, 'Other Pipeline')
+        self.assertNotContains(response, 'Mismatched Pipeline')
         
         # Test loading monitor list without query
         response_all = self.client.get(reverse('validations:list'))
         self.assertEqual(response_all.status_code, 200)
         self.assertContains(response_all, 'My Searchable Pipeline')
-        self.assertContains(response_all, 'Other Pipeline')
+        self.assertContains(response_all, 'Mismatched Pipeline')
 
     def test_description_length_limit(self):
         from django.core.exceptions import ValidationError
@@ -848,6 +848,42 @@ class AutomatedEmailNotificationTestCase(TestCase):
         
         if os.path.exists(notification.attachment_path):
             os.remove(notification.attachment_path)
+
+    def test_api_send_email_endpoint_none_error_handling(self):
+        self.client.login(username='testemailuser', password='password123')
+        run = ValidationRun.objects.create(
+            mapping=self.mapping,
+            workflow=self.workflow,
+            status='completed',
+            triggered_by=self.user,
+            trigger_type='manual',
+            total_checks=1,
+            passed_checks=1,
+            failed_checks=0
+        )
+        from validations.models import ValidationResult
+        ValidationResult.objects.create(
+            run=run,
+            column_mapping=self.col_map,
+            operation='count',
+            source_value='100',
+            target_value='100',
+            is_match=True,
+            difference='0'
+        )
+
+        from django.core.mail import EmailMessage
+        import smtplib
+        mock_send = MagicMock(side_effect=smtplib.SMTPConnectError(None, None))
+        
+        with patch.object(EmailMessage, 'send', mock_send):
+            url = reverse('validations:api_send_email', args=[run.id])
+            response = self.client.post(url, json.dumps({'email': 'manual_recipient@example.com'}), content_type='application/json')
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertFalse(data['success'])
+            self.assertNotIn('None', data['error'])
+            self.assertIn('SMTP/Connection Error', data['error'])
 
 
 from unittest.mock import patch, MagicMock
