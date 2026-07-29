@@ -174,6 +174,7 @@ class ConnectorEngine:
     def get_db2_pyodbc_connection(self):
         """Get a native pyodbc connection for DB2 with string decoding configured."""
         import pyodbc
+        import struct
         odbc_string = self._get_db2_pyodbc_string()
         conn = pyodbc.connect(odbc_string)
         # Fix DB2 SQL type -99 (graphic/custom types decoding)
@@ -183,6 +184,32 @@ class ConnectorEngine:
             conn.setencoding(encoding='utf-8')
         except Exception:
             pass
+
+        # Centralized converter to safely decode raw date/time fields to strings
+        def handle_timestamp_as_string(val):
+            if not val:
+                return None
+            try:
+                # Unpack standard 16-byte SQL_TIMESTAMP_STRUCT (year, month, day, hour, minute, second, fraction)
+                if len(val) == 16:
+                    year, month, day, hour, minute, second, fraction = struct.unpack('hhhhhhi', val)
+                    return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
+                # Unpack standard 6-byte SQL_DATE_STRUCT (year, month, day)
+                elif len(val) == 6:
+                    year, month, day = struct.unpack('hhh', val)
+                    return f"{year:04d}-{month:02d}-{day:02d}"
+            except Exception:
+                pass
+            return str(val)
+
+        # Register decoders so DB2 returns these as clean strings and avoids internal ValueError crashes
+        try:
+            conn.add_output_converter(pyodbc.SQL_TYPE_TIMESTAMP, handle_timestamp_as_string)
+            conn.add_output_converter(pyodbc.SQL_TYPE_DATE, handle_timestamp_as_string)
+            conn.add_output_converter(pyodbc.SQL_TYPE_TIME, handle_timestamp_as_string)
+        except Exception:
+            pass
+
         return conn
     #db2test
     
