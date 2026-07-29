@@ -1660,22 +1660,42 @@ class ConnectorEngine:
         full_table = self._build_full_table_name(table, schema=schema if schema and schema != 'file' else None, catalog=catalog)
         db_type = str(self.connection.connection_type).lower()
         
+        # Build SELECT columns (cast temporal columns to VARCHAR for DB2 to avoid value parsing crashes)
+        if db_type == 'db2':
+            try:
+                cols = self.get_columns(schema=schema, table=table, catalog=catalog)
+                select_parts = []
+                for col in cols:
+                    cname = col['name']
+                    ctype = str(col['type']).lower()
+                    q_cname = self._quote_identifier(cname)
+                    if 'timestamp' in ctype or 'date' in ctype or 'time' in ctype:
+                        select_parts.append(f"VARCHAR({q_cname}) AS {q_cname}")
+                    else:
+                        select_parts.append(q_cname)
+                select_clause = ", ".join(select_parts) if select_parts else "*"
+            except Exception as e:
+                logger.warning(f"Failed to inspect columns for DB2 preview, falling back to select star: {e}")
+                select_clause = "*"
+        else:
+            select_clause = "*"
+
         if offset == 0:
             if db_type in ('oracle', 'db2'):
-                query = f"SELECT * FROM {full_table} FETCH FIRST {limit} ROWS ONLY"
+                query = f"SELECT {select_clause} FROM {full_table} FETCH FIRST {limit} ROWS ONLY"
             elif db_type in ('mssql', 'sqlserver'):
-                query = f"SELECT TOP {limit} * FROM {full_table}"
+                query = f"SELECT TOP {limit} {select_clause} FROM {full_table}"
             else:
-                query = f"SELECT * FROM {full_table} LIMIT {limit}"
+                query = f"SELECT {select_clause} FROM {full_table} LIMIT {limit}"
         else:
             if db_type in ('oracle', 'db2'):
-                query = f"SELECT * FROM {full_table} OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY"
+                query = f"SELECT {select_clause} FROM {full_table} OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY"
             elif db_type in ('mssql', 'sqlserver'):
-                query = f"SELECT * FROM {full_table} ORDER BY (SELECT NULL) OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY"
+                query = f"SELECT {select_clause} FROM {full_table} ORDER BY (SELECT NULL) OFFSET {offset} ROWS FETCH NEXT {limit} ROWS ONLY"
             elif db_type in ('lakehouse', 'databricks'):
-                query = f"SELECT * FROM {full_table} LIMIT {offset + limit}"
+                query = f"SELECT {select_clause} FROM {full_table} LIMIT {offset + limit}"
             else:
-                query = f"SELECT * FROM {full_table} LIMIT {limit} OFFSET {offset}"
+                query = f"SELECT {select_clause} FROM {full_table} LIMIT {limit} OFFSET {offset}"
             
         try:
             df = self.execute_query(query)
@@ -1687,14 +1707,14 @@ class ConnectorEngine:
             try:
                 if db_type not in ('oracle', 'db2', 'mssql', 'sqlserver'):
                     try:
-                        query = f"SELECT * FROM {full_table} LIMIT {offset + limit}"
+                        query = f"SELECT {select_clause} FROM {full_table} LIMIT {offset + limit}"
                         df = self.execute_query(query)
                         if df is not None:
                             return df.iloc[offset:]
                     except Exception:
                         pass
 
-                query = f"SELECT * FROM {full_table}"
+                query = f"SELECT {select_clause} FROM {full_table}"
                 df = self.execute_query(query)
                 return df.iloc[offset:offset+limit] if df is not None else None
             except Exception as ex:
