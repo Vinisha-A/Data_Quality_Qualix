@@ -805,13 +805,15 @@ class ValidationEngine:
                     expr = f"SUM(CASE WHEN {q_col} IS NOT NULL AND {q_col} LIKE :{param_alias} THEN 0 ELSE 1 END)"
             else:
                 t = str(engine.connection.connection_type).lower()
-                std_expr = f"STDDEV({q_col})"
-                var_expr = f"VARIANCE({q_col})"
 
-                # Use DOUBLE and DECIMAL(38,0) casting for Trino/Lakehouse/Databricks to prevent bigint overflow
-                is_lakehouse = t in ('lakehouse', 'trino', 'presto', 'databricks')
-                sum_expr = f"SUM(CAST({q_col} AS DOUBLE))" if is_lakehouse else f"SUM({q_col})"
-                len_sum_expr = f"SUM(CAST(LENGTH({q_col}) AS DECIMAL(38,0)))" if is_lakehouse else f"SUM(LENGTH({q_col}))"
+                # Check for databases where arithmetic operations on large integers/decimals prone to overflow
+                is_overflow_prone = t in ('lakehouse', 'trino', 'presto', 'databricks', 'db2')
+
+                std_expr = f"STDDEV(CAST({q_col} AS DOUBLE))" if is_overflow_prone else f"STDDEV({q_col})"
+                var_expr = f"VARIANCE(CAST({q_col} AS DOUBLE))" if is_overflow_prone else f"VARIANCE({q_col})"
+                sum_expr = f"SUM(CAST({q_col} AS DOUBLE))" if is_overflow_prone else f"SUM({q_col})"
+                avg_expr = f"AVG(CAST({q_col} AS DOUBLE))" if is_overflow_prone else f"AVG({q_col})"
+                len_sum_expr = f"SUM(CAST(LENGTH({q_col}) AS DECIMAL(31,0)))" if is_overflow_prone else f"SUM(LENGTH({q_col}))"
 
                 if t == 'postgresql':
                     median_expr = f"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {q_col})"
@@ -839,7 +841,7 @@ class ValidationEngine:
                     'min': f'MIN({q_col})',
                     'max': f'MAX({q_col})',
                     'sum': sum_expr,
-                    'avg': f'AVG({q_col})',
+                    'avg': avg_expr,
                     'distinct_count': f'COUNT(DISTINCT {q_col})',
                     'null_check': f'SUM(CASE WHEN {q_col} IS NULL THEN 1 ELSE 0 END)',
                     'row_count': 'COUNT(*)',
