@@ -808,6 +808,11 @@ class ValidationEngine:
                 std_expr = f"STDDEV({q_col})"
                 var_expr = f"VARIANCE({q_col})"
 
+                # Use DOUBLE and DECIMAL(38,0) casting for Trino/Lakehouse/Databricks to prevent bigint overflow
+                is_lakehouse = t in ('lakehouse', 'trino', 'presto', 'databricks')
+                sum_expr = f"SUM(CAST({q_col} AS DOUBLE))" if is_lakehouse else f"SUM({q_col})"
+                len_sum_expr = f"SUM(CAST(LENGTH({q_col}) AS DECIMAL(38,0)))" if is_lakehouse else f"SUM(LENGTH({q_col}))"
+
                 if t == 'postgresql':
                     median_expr = f"PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY {q_col})"
                 elif t == 'oracle' or t == 'db2':
@@ -833,19 +838,19 @@ class ValidationEngine:
                     'count': f'COUNT({q_col})',
                     'min': f'MIN({q_col})',
                     'max': f'MAX({q_col})',
-                    'sum': f'SUM({q_col})',
+                    'sum': sum_expr,
                     'avg': f'AVG({q_col})',
                     'distinct_count': f'COUNT(DISTINCT {q_col})',
                     'null_check': f'SUM(CASE WHEN {q_col} IS NULL THEN 1 ELSE 0 END)',
                     'row_count': 'COUNT(*)',
                     'min_date': f'MIN({q_col})',
                     'max_date': f'MAX({q_col})',
-                    'length_sum_check': f'SUM(LENGTH({q_col}))',
-                    'sum_length': f'SUM(LENGTH({q_col}))',
+                    'length_sum_check': len_sum_expr,
+                    'sum_length': len_sum_expr,
                     'regex_check': f'SUM(CASE WHEN {q_col} IS NOT NULL AND {q_col} != \'\' THEN 1 ELSE 0 END)',
                     'unique_check': f'COUNT(DISTINCT {q_col})',
                     'range_check': f'SUM(CASE WHEN {q_col} >= 0 THEN 1 ELSE 0 END)',
-                    'equals': f'SUM({q_col})',
+                    'equals': sum_expr,
                     'equals_check': f'MIN({q_col})',
                     'starts_with_check': f'SUM(CASE WHEN {q_col} IS NOT NULL AND SUBSTR({q_col}, 1, 1) BETWEEN \'A\' AND \'z\' THEN 1 ELSE 0 END)',
                     'ends_with_check': f'SUM(CASE WHEN {q_col} IS NOT NULL AND SUBSTR({q_col}, LENGTH({q_col}), 1) BETWEEN \'A\' AND \'z\' THEN 1 ELSE 0 END)',
