@@ -1269,6 +1269,51 @@ class ConnectorEngine:
                         conn.close()
                     except Exception:
                         pass
+            elif str(self.connection.connection_type).strip().lower() == "db2":
+                import pyodbc
+                conn = self.get_db2_pyodbc_connection()
+                try:
+                    cursor = conn.cursor()
+                    param_values = []
+                    if params and isinstance(params, dict):
+                        if ":date_start" in query:
+                            query = query.replace(":date_start", "?")
+                            param_values.append(params["date_start"])
+                        if ":date_end" in query:
+                            query = query.replace(":date_end", "?")
+                            param_values.append(params["date_end"])
+                    
+                    if param_values:
+                        cursor.execute(query, param_values)
+                    else:
+                        cursor.execute(query)
+                    
+                    columns = [col[0] for col in cursor.description]
+                    
+                    rows = []
+                    row_count = 0
+                    while True:
+                        try:
+                            row = cursor.fetchone()
+                            if row is None:
+                                break
+                            rows.append(tuple(row))
+                            row_count += 1
+                        except pyodbc.ProgrammingError as pe:
+                            # A fatal cursor invalidation or end-of-cursor error: break cleanly
+                            logger.warning(f"DB2 cursor fetch terminated: {pe}")
+                            break
+                        except Exception as e:
+                            logger.error(f"DB2 row {row_count+1} fetch failed: {e}")
+                            row_count += 1
+                            break  # Since pyodbc invalidates the cursor on parsing failures, we must break here
+                    
+                    df = pd.DataFrame(rows, columns=columns)
+                finally:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
             else:
                 engine = self.get_engine()
                 with engine.connect() as conn:
