@@ -1236,12 +1236,29 @@ class ConnectorEngine:
         start_time = time.time()
         try:
             if params and isinstance(params, dict):
-                cleaned_params = {}
+                # Locate a date prefix from parameters (e.g. '2026-07-29') to heal time-only inputs
+                date_prefix = None
                 for k, val in params.items():
                     if isinstance(val, str) and len(val) >= 10 and val[4] == '-' and val[7] == '-':
-                        val = val.replace('T', ' ')
-                        if val.endswith(' 00:00'):
-                            val = val[:-6]
+                        date_prefix = val[:10]
+                        break
+                
+                if not date_prefix:
+                    from datetime import date
+                    date_prefix = date.today().isoformat()
+
+                cleaned_params = {}
+                for k, val in params.items():
+                    if isinstance(val, str):
+                        val = val.strip()
+                        # Heal time-only inputs (like '23:59:59') to valid timestamps
+                        if ':' in val and '-' not in val:
+                            val = f"{date_prefix} {val}"
+
+                        if len(val) >= 10 and val[4] == '-' and val[7] == '-':
+                            val = val.replace('T', ' ')
+                            if val.endswith(' 00:00'):
+                                val = val[:-6]
                     cleaned_params[k] = val
                 params = cleaned_params
             if self.connection.connection_type == 'lakehouse' and not self.is_mocked():
