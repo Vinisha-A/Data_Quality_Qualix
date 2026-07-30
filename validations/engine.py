@@ -864,6 +864,15 @@ class ValidationEngine:
                 }
                 expr = op_map.get(operation, f'COUNT({q_col})')
 
+                if t == 'db2':
+                    datatype = col_mapping.source_datatype if is_source else col_mapping.target_datatype
+                    dt = str(datatype or '').upper()
+                    is_numeric = any(x in dt for x in ('INT', 'BIGINT', 'SMALLINT', 'TINYINT', 'NUMERIC', 'DECIMAL', 'FLOAT', 'DOUBLE', 'REAL', 'NUMBER'))
+                    always_numeric_ops = ('sum', 'avg', 'std_dev', 'variance', 'equals')
+                    dep_numeric_ops = ('min', 'max', 'median', 'mode')
+                    if operation in always_numeric_ops or (operation in dep_numeric_ops and is_numeric):
+                        expr = f"CAST({expr} AS DECIMAL(31, 6))"
+
             alias = f"col_alias_{idx}"
             select_exprs.append(f"{expr} AS {alias}")
             alias_to_rule[alias] = (col_mapping.id, operation)

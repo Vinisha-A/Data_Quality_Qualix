@@ -1249,15 +1249,15 @@ class ConnectorEngine:
 
                 cleaned_params = {}
                 for k, val in params.items():
-                    if isinstance(val, str) and k in ('date_start', 'date_end'):
-                        val = val.strip()
+                    if k in ('date_start', 'date_end') and val is not None:
+                        val = str(val).strip()
                         # 1. Valid date/timestamp format (e.g., 'YYYY-MM-DD...')
                         if len(val) >= 10 and val[4] == '-' and val[7] == '-':
                             pass
                         # 2. Time-only input (e.g., '23:59:59')
                         elif ':' in val and '-' not in val:
                             val = f"{date_prefix} {val}"
-                        # 3. Relative integer input (e.g., '9' or '-9')
+                        # 3. Relative integer input (e.g., 9 or '9' or '-9')
                         else:
                             try:
                                 num = int(val)
