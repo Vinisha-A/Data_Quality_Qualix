@@ -439,7 +439,7 @@ class ConnectorEngine:
                     df = self.execute_query(query)
                     return self._extract_first_column(df)
                 # Oracle — fetch accessible schemas via ALL_USERS
-                if ctype == 'oracle':
+                elif ctype == 'oracle':
                     try:
                         df = self.execute_query("SELECT USERNAME FROM ALL_USERS ORDER BY USERNAME")
                         schemas = self._extract_first_column(df)
@@ -448,6 +448,9 @@ class ConnectorEngine:
                         logger.warning(f"Oracle ALL_USERS query failed, falling back to inspector: {e}")
                         inspector = inspect(engine)
                         return inspector.get_schema_names()
+                else:
+                    inspector = inspect(engine)
+                    return inspector.get_schema_names()
             except Exception as e:
                 logger.error(f"Error getting schemas: {e}")
                 return []
@@ -614,25 +617,11 @@ class ConnectorEngine:
                     tables = inspector.get_table_names(schema=schema or None)
                     views = inspector.get_view_names(schema=schema or None)
                     return sorted(tables + views)
-                # db2test
-                # if ctype == 'db2':
-                #     sch = (schema or '').upper()
-                #     try:
-                #         if sch:
-                #             df = self.execute_query(
-                #                 f"SELECT TABNAME FROM SYSCAT.TABLES WHERE TABSCHEMA = '{sch}' AND TYPE IN ('T', 'V') ORDER BY TABNAME"
-                #             )
-                #         else:
-                #             df = self.execute_query(
-                #                 "SELECT TABNAME FROM SYSCAT.TABLES WHERE TYPE IN ('T', 'V') ORDER BY TABNAME"
-                #             )
-                #         tables = self._extract_first_column(df)
-                #         return sorted(tables) if tables else []
-                #     except Exception as e:
-                #         logger.warning(f"DB2 SYSCAT.TABLES query failed: {e}")
-                #         return []
-
-                engine = self.get_engine()
+                else:
+                    inspector = inspect(engine)
+                    tables = inspector.get_table_names(schema=schema or None)
+                    views = inspector.get_view_names(schema=schema or None)
+                    return sorted(tables + views)
                 
             except Exception as e:
                 logger.error(f"Error getting tables: {e}")
