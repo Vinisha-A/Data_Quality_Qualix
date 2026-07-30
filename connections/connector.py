@@ -1736,7 +1736,7 @@ class ConnectorEngine:
                     ctype = str(col['type']).lower()
                     q_cname = self._quote_identifier(cname)
                     if 'timestamp' in ctype or 'date' in ctype or 'time' in ctype:
-                        select_parts.append(f"VARCHAR({q_cname}) AS {q_cname}")
+                        select_parts.append(f"CAST({q_cname} AS VARCHAR(50)) AS {q_cname}")
                     else:
                         select_parts.append(q_cname)
                 select_clause = ", ".join(select_parts) if select_parts else "*"
