@@ -1249,16 +1249,31 @@ class ConnectorEngine:
 
                 cleaned_params = {}
                 for k, val in params.items():
-                    if isinstance(val, str):
+                    if isinstance(val, str) and k in ('date_start', 'date_end'):
                         val = val.strip()
-                        # Heal time-only inputs (like '23:59:59') to valid timestamps
-                        if ':' in val and '-' not in val:
+                        # 1. Valid date/timestamp format (e.g., 'YYYY-MM-DD...')
+                        if len(val) >= 10 and val[4] == '-' and val[7] == '-':
+                            pass
+                        # 2. Time-only input (e.g., '23:59:59')
+                        elif ':' in val and '-' not in val:
                             val = f"{date_prefix} {val}"
+                        # 3. Relative integer input (e.g., '9' or '-9')
+                        else:
+                            try:
+                                num = int(val)
+                                from datetime import date, timedelta
+                                days_offset = -abs(num) if num > 0 else num
+                                val = (date.today() + timedelta(days=days_offset)).isoformat()
+                            except ValueError:
+                                from datetime import date
+                                val = date.today().isoformat()
 
                         if len(val) >= 10 and val[4] == '-' and val[7] == '-':
                             val = val.replace('T', ' ')
                             if val.endswith(' 00:00'):
                                 val = val[:-6]
+                    elif isinstance(val, str):
+                        val = val.strip()
                     cleaned_params[k] = val
                 params = cleaned_params
             if self.connection.connection_type == 'lakehouse' and not self.is_mocked():
