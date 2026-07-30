@@ -1737,6 +1737,8 @@ class ConnectorEngine:
                     q_cname = self._quote_identifier(cname)
                     if 'timestamp' in ctype or 'date' in ctype or 'time' in ctype:
                         select_parts.append(f"CAST({q_cname} AS VARCHAR(50)) AS {q_cname}")
+                    elif any(x in ctype for x in ('double', 'float', 'real', 'decimal', 'numeric', 'number')):
+                        select_parts.append(f"CAST({q_cname} AS DECIMAL(31, 6)) AS {q_cname}")
                     else:
                         select_parts.append(q_cname)
                 select_clause = ", ".join(select_parts) if select_parts else "*"
