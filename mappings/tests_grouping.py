@@ -156,3 +156,59 @@ class PipelineGroupingTestCase(TestCase):
         assignment = PipelineGroupAssignment.objects.filter(mapping=mapping).first()
         self.assertIsNotNone(assignment)
         self.assertEqual(assignment.group, group)
+
+    def test_create_pipeline_with_manual_mappings(self):
+        """Test that creating a new pipeline via POST with column_mappings_json representing manual mapping stores it correctly."""
+        import json
+        column_mappings_json = json.dumps([
+            {
+                'source_column': 'user_id',
+                'source_datatype': 'INTEGER',
+                'target_column': 'uid',
+                'target_datatype': 'INTEGER',
+                'operations': ['null_check', 'unique_check']
+            },
+            {
+                'source_column': 'email_address',
+                'source_datatype': 'VARCHAR',
+                'target_column': 'email',
+                'target_datatype': 'VARCHAR',
+                'operations': ['null_check']
+            }
+        ])
+
+        create_url = reverse('mappings:create')
+        data = {
+            'name': 'Manual Mapped Pipeline',
+            'source_connection': self.conn1.id,
+            'target_connection': self.conn2.id,
+            'source_table': 'src_tbl',
+            'target_table': 'tgt_tbl',
+            'column_mappings_json': column_mappings_json,
+        }
+
+        response = self.client.post(create_url, data)
+        self.assertEqual(response.status_code, 302)
+
+        # Verify mapping was created
+        mapping = Mapping.objects.get(name='Manual Mapped Pipeline')
+        col_mappings = mapping.column_mappings.all().order_by('source_column')
+        self.assertEqual(len(col_mappings), 2)
+
+        # First mapping
+        cm1 = col_mappings[0]
+        self.assertEqual(cm1.source_column, 'email_address')
+        self.assertEqual(cm1.target_column, 'email')
+        self.assertEqual(cm1.source_datatype, 'VARCHAR')
+        self.assertEqual(cm1.target_datatype, 'VARCHAR')
+        rules1 = [r.operation for r in cm1.rules.all()]
+        self.assertEqual(rules1, ['null_check'])
+
+        # Second mapping
+        cm2 = col_mappings[1]
+        self.assertEqual(cm2.source_column, 'user_id')
+        self.assertEqual(cm2.target_column, 'uid')
+        self.assertEqual(cm2.source_datatype, 'INTEGER')
+        self.assertEqual(cm2.target_datatype, 'INTEGER')
+        rules2 = sorted([r.operation for r in cm2.rules.all()])
+        self.assertEqual(rules2, ['null_check', 'unique_check'])

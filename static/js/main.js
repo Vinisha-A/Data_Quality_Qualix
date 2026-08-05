@@ -468,6 +468,11 @@ function loadColumns(connId, schema, table, prefix, catalog = '') {
         .then(data => {
             select.innerHTML = '<option value="">Select Column</option>';
             if (data.columns && data.columns.length > 0) {
+                if (prefix === 'source') {
+                    window.sourceColumnsList = data.columns;
+                } else if (prefix === 'target') {
+                    window.targetColumnsList = data.columns;
+                }
                 data.columns.forEach(col => {
                     const opt = document.createElement('option');
                     opt.value = col.name;
@@ -640,6 +645,10 @@ function clearColumnList(prefix) {
     const checklist = document.getElementById(`${prefix}-columns-checkboxes-list`);
     if (checklist) {
         checklist.innerHTML = '';
+    }
+    const manualTableBody = document.getElementById('manual-mappings-table-body');
+    if (manualTableBody) {
+        manualTableBody.innerHTML = '';
     }
     const searchInput = document.getElementById(`${prefix}-columns-search-input`);
     if (searchInput) {
@@ -1291,6 +1300,24 @@ async function restoreMappingDraft(data) {
                     console.error("Failed to parse draft column mappings JSON", e);
                 }
             }
+        } else if (currentMode === 'manual') {
+            const mappingsJSON = data['column_mappings_json'];
+            if (mappingsJSON) {
+                try {
+                    const mappings = JSON.parse(mappingsJSON);
+                    const tableBody = document.getElementById('manual-mappings-table-body');
+                    if (tableBody) {
+                        tableBody.innerHTML = '';
+                    }
+                    setTimeout(() => {
+                        mappings.forEach(m => {
+                            addManualMappingRow(m);
+                        });
+                    }, 200);
+                } catch (e) {
+                    console.error("Failed to parse draft column mappings JSON", e);
+                }
+            }
         } else if (currentMode === 'all') {
             const mappingsJSON = data['column_mappings_json'];
             if (mappingsJSON) {
@@ -1617,6 +1644,7 @@ function handleColumnModeChange() {
     const targetSingleWrapper = document.getElementById('target-single-column-wrapper');
     const targetMultiWrapper = document.getElementById('target-multiple-columns-wrapper');
     const targetMultiMessage = document.getElementById('target-multiple-message');
+    const manualMappingWrapper = document.getElementById('manual-mapping-wrapper');
 
     const sourceSingleOps = document.getElementById('source-single-ops-container');
     const targetSingleOps = document.getElementById('target-single-ops-container');
@@ -1629,6 +1657,7 @@ function handleColumnModeChange() {
         if (targetSingleWrapper) targetSingleWrapper.style.display = 'none';
         if (targetMultiWrapper) targetMultiWrapper.style.display = 'none';
         if (targetMultiMessage) targetMultiMessage.style.display = 'none';
+        if (manualMappingWrapper) manualMappingWrapper.style.display = 'none';
         if (sourceSingleOps) sourceSingleOps.style.display = 'none';
         if (targetSingleOps) targetSingleOps.style.display = 'none';
         
@@ -1662,6 +1691,22 @@ function handleColumnModeChange() {
         if (targetSingleOps) targetSingleOps.style.display = 'none';
         
         if (validationOpsSection) validationOpsSection.style.display = 'block';
+    } else if (mode === 'manual') {
+        if (sourceSingleWrapper) sourceSingleWrapper.style.display = 'none';
+        if (sourceMultiWrapper) sourceMultiWrapper.style.display = 'none';
+        if (targetSingleWrapper) targetSingleWrapper.style.display = 'none';
+        if (targetMultiWrapper) targetMultiWrapper.style.display = 'none';
+        if (targetMultiMessage) targetMultiMessage.style.display = 'none';
+        if (manualMappingWrapper) manualMappingWrapper.style.display = 'block';
+        if (sourceSingleOps) sourceSingleOps.style.display = 'none';
+        if (targetSingleOps) targetSingleOps.style.display = 'none';
+        
+        if (validationOpsSection) validationOpsSection.style.display = 'none';
+
+        const tableBody = document.getElementById('manual-mappings-table-body');
+        if (tableBody && tableBody.children.length === 0) {
+            addManualMappingRow();
+        }
     }
 
     handleColumnSelectionChange();
@@ -1669,6 +1714,7 @@ function handleColumnModeChange() {
 
 function handleColumnSelectionChange() {
     const mode = getColumnSelectionMode();
+    if (mode === 'manual') return;
 
     const sourceSelect = document.getElementById('source-column-select');
     const targetSelect = document.getElementById('target-column-select');
@@ -1964,6 +2010,35 @@ function getColumnMappingsJSON() {
                 });
             }
         });
+    } else if (mode === 'manual') {
+        let mappings = [];
+        let hasIncomplete = false;
+        const rows = document.querySelectorAll('.manual-mapping-row');
+        rows.forEach(row => {
+            const sCol = row.querySelector('.manual-source-col').value;
+            const tCol = row.querySelector('.manual-target-col').value;
+            if (sCol && tCol) {
+                const sOpt = row.querySelector(`.manual-source-col option[value="${sCol}"]`);
+                const tOpt = row.querySelector(`.manual-target-col option[value="${tCol}"]`);
+                const sType = sOpt ? sOpt.dataset.datatype : 'unknown';
+                const tType = tOpt ? tOpt.dataset.datatype : 'unknown';
+                const checkedOps = Array.from(row.querySelectorAll('.row-op-cb:checked')).map(cb => cb.value);
+                mappings.push({
+                    source_column: sCol,
+                    source_datatype: sType,
+                    target_column: tCol,
+                    target_datatype: tType,
+                    operations: checkedOps
+                });
+            } else if (sCol || tCol) {
+                hasIncomplete = true;
+            }
+        });
+        if (hasIncomplete) {
+            showToast('Please select both source and target columns for all manual mapping rows, or remove incomplete rows.', 'warning');
+            return '[]';
+        }
+        return JSON.stringify(mappings);
     }
 
     return JSON.stringify(mappings);
@@ -2139,6 +2214,138 @@ window.updateSingleOpsCount = updateSingleOpsCount;
 
 window.getColumnSelectionMode = getColumnSelectionMode;
 window.renderSingleColumnOps = renderSingleColumnOps;
+
+window.sourceColumnsList = [];
+window.targetColumnsList = [];
+
+function addManualMappingRow(initialData = null) {
+    const tableBody = document.getElementById('manual-mappings-table-body');
+    if (!tableBody) return;
+
+    const rowId = 'manual-row-' + Date.now() + '-' + Math.floor(Math.random() * 1000);
+    const row = document.createElement('tr');
+    row.id = rowId;
+    row.className = 'manual-mapping-row';
+
+    // Build source column options
+    let sourceOptions = '<option value="">-- Select Source Column --</option>';
+    (window.sourceColumnsList || []).forEach(col => {
+        const selected = (initialData && initialData.source_column === col.name) ? 'selected' : '';
+        sourceOptions += `<option value="${col.name}" data-datatype="${col.type}" ${selected}>${col.name} (${col.type})</option>`;
+    });
+
+    // Build target column options
+    let targetOptions = '<option value="">-- Select Target Column --</option>';
+    (window.targetColumnsList || []).forEach(col => {
+        const selected = (initialData && initialData.target_column === col.name) ? 'selected' : '';
+        targetOptions += `<option value="${col.name}" data-datatype="${col.type}" ${selected}>${col.name} (${col.type})</option>`;
+    });
+
+    row.innerHTML = `
+        <td style="padding: 8px; border: none;">
+            <select class="form-control manual-source-col" style="font-size: 0.85rem; padding: 6px 10px;">
+                ${sourceOptions}
+            </select>
+        </td>
+        <td style="padding: 8px; text-align: center; vertical-align: middle; color: var(--text-muted); border: none;">
+            <i class="fas fa-arrow-right" style="margin-top: 8px;"></i>
+        </td>
+        <td style="padding: 8px; border: none;">
+            <select class="form-control manual-target-col" style="font-size: 0.85rem; padding: 6px 10px;">
+                ${targetOptions}
+            </select>
+        </td>
+        <td style="padding: 8px; position: relative; border: none;">
+            <div class="custom-multiselect row-op-dropdown-wrapper" style="width: 100%; position: relative;">
+                <div class="multiselect-select-box" onclick="toggleOpsDropdown(this)" style="padding: 6px 12px; font-size: 0.85rem; min-height: 34px; line-height: 20px;">
+                    <span class="row-ops-count-span">Choose Validation</span>
+                </div>
+                <div class="multiselect-checkboxes" style="display: none; padding: 8px; position: absolute; z-index: 1000; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: var(--radius-sm); box-shadow: var(--shadow-md); width: 220px; right: 0;">
+                    <!-- Checkboxes populated based on selected source datatype -->
+                </div>
+            </div>
+        </td>
+        <td style="padding: 8px; text-align: center; vertical-align: middle; border: none;">
+            <button type="button" class="btn btn-xs btn-outline btn-danger remove-manual-row-btn" style="padding: 6px 10px; border-radius: var(--radius-sm);">
+                <i class="fas fa-trash-alt"></i>
+            </button>
+        </td>
+    `;
+
+    const sourceSelect = row.querySelector('.manual-source-col');
+    const targetSelect = row.querySelector('.manual-target-col');
+    const opsContainer = row.querySelector('.multiselect-checkboxes');
+    const opsSpan = row.querySelector('.row-ops-count-span');
+    const removeBtn = row.querySelector('.remove-manual-row-btn');
+
+    function updateOpsForSelectedSource() {
+        const sCol = sourceSelect.value;
+        if (!sCol) {
+            opsContainer.innerHTML = '<span style="font-size: 0.75rem; color: var(--text-muted); padding: 4px 8px; display: block;">Select a source column first</span>';
+            opsSpan.textContent = 'Choose Validation';
+            return;
+        }
+
+        const selectedOpt = sourceSelect.selectedOptions[0];
+        const type = selectedOpt ? selectedOpt.dataset.datatype : 'unknown';
+        const cat = categorizeDatatype(type, sCol);
+        const ops = OP_LISTS[cat] || OP_LISTS.VARCHAR;
+
+        let html = '';
+        ops.forEach(op => {
+            const isChecked = (initialData && initialData.operations) ? initialData.operations.includes(op.value) : true;
+            html += `
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 8px; font-size: 0.8rem; margin: 0; font-weight: 500; width: 100%;">
+                    <input type="checkbox" value="${op.value}" class="row-op-cb" ${isChecked ? 'checked' : ''} style="margin:0;">
+                    <span>${op.label}</span>
+                </label>
+            `;
+        });
+        opsContainer.innerHTML = html;
+
+        row.querySelectorAll('.row-op-cb').forEach(cb => {
+            cb.addEventListener('change', () => {
+                updateRowOpsCount();
+                handleColumnSelectionChange();
+            });
+        });
+        updateRowOpsCount();
+    }
+
+    function updateRowOpsCount() {
+        const checked = row.querySelectorAll('.row-op-cb:checked');
+        if (checked.length === 0) {
+            opsSpan.textContent = 'Choose Validation';
+        } else {
+            opsSpan.textContent = `${checked.length} Op(s)`;
+        }
+    }
+
+    sourceSelect.addEventListener('change', () => {
+        updateOpsForSelectedSource();
+        if (sourceSelect.value && !targetSelect.value) {
+            const matchOpt = Array.from(targetSelect.options).find(o => o.value.toLowerCase() === sourceSelect.value.toLowerCase());
+            if (matchOpt) {
+                targetSelect.value = matchOpt.value;
+            }
+        }
+        handleColumnSelectionChange();
+    });
+
+    targetSelect.addEventListener('change', () => {
+        handleColumnSelectionChange();
+    });
+
+    removeBtn.addEventListener('click', () => {
+        row.remove();
+        handleColumnSelectionChange();
+    });
+
+    tableBody.appendChild(row);
+    updateOpsForSelectedSource();
+}
+
+window.addManualMappingRow = addManualMappingRow;
 
 
 // ─── Dynamic Notifications Center ───────────────────────────────────────────

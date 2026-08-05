@@ -147,6 +147,9 @@
                     <label class="d-flex align-center gap-6" style="font-weight: 500; cursor: pointer; margin: 0; color: var(--text-primary);">
                         <input type="radio" name="column_selection_mode" value="all" onchange="handleColumnModeChange()"> All Columns
                     </label>
+                    <label class="d-flex align-center gap-6" style="font-weight: 500; cursor: pointer; margin: 0; color: var(--text-primary);">
+                        <input type="radio" name="column_selection_mode" value="manual" onchange="handleColumnModeChange()"> Manual Mapping
+                    </label>
                 </div>
             </div>
             
@@ -194,6 +197,32 @@
                     <div id="target-multiple-message" style="display: none; font-size: 0.85rem; color: var(--text-muted); font-style: italic; margin-top: 8px;">
                         Select matching columns on both panels.
                     </div>
+                </div>
+            </div>
+
+            <!-- Manual Mapping Selector Table -->
+            <div id="manual-mapping-wrapper" style="display: none; width: 100%; margin-top: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <label style="font-weight: 600; font-size: 0.9rem; margin: 0;">Define Column Mappings *</label>
+                    <button type="button" class="btn btn-xs btn-primary btn-icon-label" id="add-manual-mapping-row-btn" onclick="addManualMappingRow()" style="padding: 6px 12px; font-size: 0.8rem; height: 32px; border-radius: 6px;">
+                        <i class="fas fa-plus"></i> Add Column Mapping
+                    </button>
+                </div>
+                <div style="overflow-x: auto; border: 1.5px solid var(--border-light); border-radius: var(--radius-lg); background: var(--bg-card);">
+                    <table class="table" style="margin: 0; width: 100%;">
+                        <thead>
+                            <tr style="background: var(--primary-subtle); border-bottom: 1.5px solid var(--border-light);">
+                                <th style="width: 35%; font-weight: 600; font-size: 0.85rem; padding: 10px 12px; border: none;">Source Column</th>
+                                <th style="width: 5%; padding: 10px 12px; border: none;"></th>
+                                <th style="width: 35%; font-weight: 600; font-size: 0.85rem; padding: 10px 12px; border: none;">Target Column</th>
+                                <th style="width: 20%; font-weight: 600; font-size: 0.85rem; padding: 10px 12px; border: none;">Validation Operations</th>
+                                <th style="width: 5%; padding: 10px 12px; text-align: center; border: none;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="manual-mappings-table-body">
+                            <!-- Populated dynamically -->
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>

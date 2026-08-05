@@ -768,7 +768,11 @@ def mapping_edit_view(request, mapping_id):
     if col_mappings_list and col_mappings_list[0]['source_column'] == '__all__':
         mode = 'all'
     elif len(col_mappings_list) > 1:
-        mode = 'multiple'
+        is_manual = any(cm['source_column'].lower() != cm['target_column'].lower() for cm in col_mappings_list)
+        if is_manual:
+            mode = 'manual'
+        else:
+            mode = 'multiple'
 
     source_columns = []
     target_columns = []
