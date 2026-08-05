@@ -231,7 +231,9 @@ def export_report(request, run_id):
         ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
     val_date = run.created_at.strftime('%Y-%m-%d')
-    filename = f"{mapping.source_table.upper()}_{val_date}.xlsx"
+    import re
+    safe_pipeline_name = re.sub(r'[\\/*?:"<>|]', "", mapping.name).strip()
+    filename = f"{safe_pipeline_name}.xlsx"
 
     response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'

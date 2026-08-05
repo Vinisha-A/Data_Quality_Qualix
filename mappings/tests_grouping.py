@@ -133,3 +133,26 @@ class PipelineGroupingTestCase(TestCase):
         response = self.client.get(reverse('mappings:list') + '?group=lh_to_mkt_uc')
         self.assertEqual(len(response.context['mappings']), 1)
         self.assertEqual(response.context['mappings'][0], m1)
+
+    def test_create_pipeline_inside_group(self):
+        """Test that creating a new pipeline via POST with a group parameter maps it to that custom group."""
+        group = PipelineGroup.objects.create(name='Finance')
+        
+        create_url = reverse('mappings:create')
+        data = {
+            'name': 'New Finance Pipeline',
+            'source_connection': self.conn1.id,
+            'target_connection': self.conn2.id,
+            'source_table': 'src_tbl',
+            'target_table': 'tgt_tbl',
+            'group': f'custom_{group.id}',
+        }
+        
+        response = self.client.post(create_url, data)
+        self.assertEqual(response.status_code, 302)
+        
+        # Verify the new mapping exists and is assigned to the group
+        mapping = Mapping.objects.get(name='New Finance Pipeline')
+        assignment = PipelineGroupAssignment.objects.filter(mapping=mapping).first()
+        self.assertIsNotNone(assignment)
+        self.assertEqual(assignment.group, group)

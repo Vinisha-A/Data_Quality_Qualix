@@ -6,6 +6,7 @@
 {% block content %}
 <form method="post" action="{% url 'mappings:create' %}" id="mapping-form">
     {% csrf_token %}
+    <input type="hidden" name="group" value="{{ selected_group|default:'' }}">
     <input type="hidden" name="column_mappings_json" id="column-mappings-json" value="[]">
 
     <!-- Draft Restore Banner -->

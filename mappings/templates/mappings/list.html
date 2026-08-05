@@ -73,7 +73,7 @@
             <button onclick="openAddGroupModal()" class="btn btn-secondary btn-sm btn-icon-label" style="height: 38px; background: white; border: 1px solid var(--border-medium); color: var(--text-secondary); cursor: pointer;">
                 <i class="fas fa-folder-plus"></i> Add Group
             </button>
-            <a href="{% url 'mappings:create' %}" class="btn btn-primary btn-sm btn-icon-label" style="height: 38px;">
+            <a href="{% url 'mappings:create' %}{% if selected_group %}?group={{ selected_group }}{% endif %}" class="btn btn-primary btn-sm btn-icon-label" style="height: 38px;">
                 <i class="fas fa-plus"></i> New Pipeline
             </a>
             {% endif %}
@@ -105,7 +105,7 @@
                         </button>
                     {% endif %}
                     {% if user_profile.role != 'auditor' and not query %}
-                    <a href="{% url 'mappings:create' %}" class="btn btn-secondary btn-sm btn-icon-label" style="background: white; border: 1px solid var(--border-medium); color: var(--text-secondary);">
+                    <a href="{% url 'mappings:create' %}{% if selected_group %}?group={{ selected_group }}{% endif %}" class="btn btn-secondary btn-sm btn-icon-label" style="background: white; border: 1px solid var(--border-medium); color: var(--text-secondary);">
                         <i class="fas fa-plus"></i> Create Pipeline
                     </a>
                     {% endif %}

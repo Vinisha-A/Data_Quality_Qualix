@@ -693,6 +693,7 @@ class ValidationWorkspaceEnhancementsTestCase(TestCase):
         response_export = self.client.get(export_url)
         self.assertEqual(response_export.status_code, 200)
         self.assertEqual(response_export['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        self.assertEqual(response_export['Content-Disposition'], 'attachment; filename="Preservation Test Mapping.xlsx"')
 
 
 import os

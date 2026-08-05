@@ -172,6 +172,7 @@ def mapping_create_view(request):
     """Create a new source-target mapping."""
     connections = DataConnection.objects.filter(is_active=True)
     operations = ValidationRule.OPERATION_CHOICES
+    selected_group = (request.POST.get('group') or request.GET.get('group', '')).strip()
 
     if request.method == 'POST':
         try:
@@ -181,6 +182,7 @@ def mapping_create_view(request):
                 return render(request, 'mappings/create.html', {
                     'connections': connections,
                     'operations': operations,
+                    'selected_group': selected_group,
                 })
 
             description = request.POST.get('description', '')
@@ -302,6 +304,24 @@ def mapping_create_view(request):
 
             try:
                 mapping = Mapping.objects.create(**mapping_data)
+                if selected_group:
+                    group_id = None
+                    if selected_group.startswith('custom_'):
+                        try:
+                            group_id = int(selected_group.split('_')[1])
+                        except (ValueError, IndexError):
+                            pass
+                    else:
+                        try:
+                            group_id = int(selected_group)
+                        except ValueError:
+                            pass
+                    if group_id:
+                        try:
+                            group = PipelineGroup.objects.get(id=group_id)
+                            PipelineGroupAssignment.objects.create(group=group, mapping=mapping)
+                        except PipelineGroup.DoesNotExist:
+                            pass
             except Exception as e:
                 logger.error(
                     f"Error creating mapping. "
@@ -435,6 +455,7 @@ def mapping_create_view(request):
     return render(request, 'mappings/create.html', {
         'connections': connections,
         'operations': operations,
+        'selected_group': selected_group,
     })
 
 
