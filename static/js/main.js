@@ -183,8 +183,11 @@ function initConnectionSelects() {
         sourceConn.addEventListener('change', () => {
             handleConnectionChange(sourceConn, 'source');
         });
-        if (sourceConn.value && !window.isRestoringDraft) {
-            handleConnectionChange(sourceConn, 'source');
+        if (sourceConn.value) {
+            updateSchemaTableLabels(sourceConn, 'source');
+            if (!window.isRestoringDraft) {
+                handleConnectionChange(sourceConn, 'source');
+            }
         }
     }
 
@@ -194,8 +197,11 @@ function initConnectionSelects() {
         targetConn.addEventListener('change', () => {
             handleConnectionChange(targetConn, 'target');
         });
-        if (targetConn.value && !window.isRestoringDraft) {
-            handleConnectionChange(targetConn, 'target');
+        if (targetConn.value) {
+            updateSchemaTableLabels(targetConn, 'target');
+            if (!window.isRestoringDraft) {
+                handleConnectionChange(targetConn, 'target');
+            }
         }
     }
 
@@ -313,6 +319,23 @@ function initConnectionSelects() {
 // Only Databricks and Lakehouse require a catalog selection; all others go straight to schema.
 const DB_TYPES_WITH_CATALOG = ['databricks', 'lakehouse'];
 
+function updateSchemaTableLabels(selectEl, prefix) {
+    const labelSchema = document.getElementById(`label-${prefix}-schema`);
+    const labelTable = document.getElementById(`label-${prefix}-table`);
+    if (!labelSchema || !labelTable) return;
+
+    const selectedOpt = selectEl.selectedOptions[0];
+    const connType = selectedOpt ? selectedOpt.getAttribute('data-type') : '';
+
+    if (connType === 'azure_blob') {
+        labelSchema.textContent = 'Folder';
+        labelTable.textContent = 'File *';
+    } else {
+        labelSchema.textContent = 'Schema';
+        labelTable.textContent = 'Table *';
+    }
+}
+
 async function handleConnectionChange(selectEl, prefix) {
     const connId = selectEl.value;
     const catalogGroup = document.getElementById(`${prefix}-catalog-group`);
@@ -324,6 +347,8 @@ async function handleConnectionChange(selectEl, prefix) {
     clearSelect(`${prefix}-schema`);
     clearSelect(`${prefix}-table`);
     clearColumnList(prefix);
+
+    updateSchemaTableLabels(selectEl, prefix);
 
     if (!connId) return;
 

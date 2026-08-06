@@ -4,6 +4,8 @@ Handles introspection (schemas, tables, columns) and data reading
 for PostgreSQL, MySQL, CSV, and Parquet sources.
 """
 import logging
+import warnings
+warnings.filterwarnings("ignore", message=".*Tuple timeout setting is deprecated.*")
 import threading
 import time
 import pandas as pd
