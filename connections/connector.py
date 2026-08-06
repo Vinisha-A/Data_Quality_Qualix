@@ -13,6 +13,11 @@ import os
 os.environ["JAVA_HOME"]="/usr/lib/java/jre"
 logger = logging.getLogger('connections')
 
+try:
+    from azure.storage.blob import BlobServiceClient
+except ImportError:
+    BlobServiceClient = None
+
 # Thread-safe global SQLAlchemy engine cache
 _engines_cache = {}
 _engines_lock = threading.Lock()
@@ -460,6 +465,67 @@ class ConnectorEngine:
     def get_tables(self, schema=None, catalog=None):
         """Get list of tables from a schema (optionally within a catalog)."""
         if self.connection.is_file:
+            if self.connection.connection_type == 'azure_blob':
+                if BlobServiceClient is None:
+                    raise ImportError("The 'azure-storage-blob' package is required for Azure Blob Storage connections. Please install it using pip.")
+                
+                container_name = self.connection.database_name
+                prefix = (self.connection.host or '').strip()
+                
+                # Auto-parse container and prefix if host contains '/' and container is empty
+                if not container_name and '/' in prefix:
+                    parts = [p for p in prefix.split('/') if p]
+                    if parts:
+                        container_name = parts[0]
+                        prefix = '/'.join(parts[1:])
+                
+                if not container_name:
+                    logger.error("Container name is empty or not configured.")
+                    return []
+                
+                prefix = prefix.strip('/')
+                if prefix:
+                    prefix = prefix + '/'
+
+                try:
+                    conn_str = self.connection.get_password()
+                    account_name = self.connection.username
+                    
+                    if conn_str and "DefaultEndpointsProtocol" in conn_str:
+                        client = BlobServiceClient.from_connection_string(conn_str)
+                    elif account_name and conn_str:
+                        account_url = f"https://{account_name}.blob.core.windows.net"
+                        client = BlobServiceClient(account_url=account_url, credential=conn_str)
+                    else:
+                        env_conn = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+                        if env_conn:
+                            client = BlobServiceClient.from_connection_string(env_conn)
+                        else:
+                            if not account_name:
+                                account_name = "devstoreaccount1"
+                            account_url = f"https://{account_name}.blob.core.windows.net"
+                            client = BlobServiceClient(account_url=account_url, credential=None)
+                    
+                    container_client = client.get_container_client(container_name)
+                    blobs = container_client.list_blobs(name_starts_with=prefix)
+                    
+                    table_names = []
+                    for b in blobs:
+                        name = b.name
+                        if prefix and name.startswith(prefix):
+                            rel_name = name[len(prefix):].lstrip('/')
+                        else:
+                            rel_name = name
+                        
+                        if rel_name and not rel_name.endswith('/'):
+                            if rel_name.lower().endswith(('.csv', '.parquet', '.parq', '.xlsx', '.xls', '.txt')):
+                                table_names.append(rel_name)
+                    
+                    return sorted(list(set(table_names)))
+                except Exception as e:
+                    logger.error(f"Error listing Azure Blob tables: {e}")
+                    return []
+
             import os
             folder_path = self.connection.host
             if folder_path and os.path.exists(folder_path):
@@ -1147,6 +1213,113 @@ class ConnectorEngine:
 
     def read_file(self, limit=None, table=None):
         """Read a CSV, Parquet, Excel, or Text file and return a Pandas DataFrame."""
+        if self.connection.connection_type == 'azure_blob':
+            if BlobServiceClient is None:
+                raise ImportError("The 'azure-storage-blob' package is required for Azure Blob Storage connections. Please install it using pip.")
+            
+            container_name = self.connection.database_name
+            prefix = (self.connection.host or '').strip()
+            
+            if not container_name and '/' in prefix:
+                parts = [p for p in prefix.split('/') if p]
+                if parts:
+                    container_name = parts[0]
+                    prefix = '/'.join(parts[1:])
+            
+            prefix = prefix.strip('/')
+            
+            if table:
+                if prefix:
+                    blob_name = f"{prefix}/{table}"
+                else:
+                    blob_name = table
+            else:
+                tables = self.get_tables()
+                if tables:
+                    first_table = tables[0]
+                    if prefix:
+                        blob_name = f"{prefix}/{first_table}"
+                    else:
+                        blob_name = first_table
+                else:
+                    logger.error("No tables found in Azure Blob Storage container to read from.")
+                    return None
+            
+            try:
+                conn_str = self.connection.get_password()
+                account_name = self.connection.username
+                
+                if conn_str and "DefaultEndpointsProtocol" in conn_str:
+                    client = BlobServiceClient.from_connection_string(conn_str)
+                elif account_name and conn_str:
+                    account_url = f"https://{account_name}.blob.core.windows.net"
+                    client = BlobServiceClient(account_url=account_url, credential=conn_str)
+                else:
+                    env_conn = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
+                    if env_conn:
+                        client = BlobServiceClient.from_connection_string(env_conn)
+                    else:
+                        if not account_name:
+                            account_name = "devstoreaccount1"
+                        account_url = f"https://{account_name}.blob.core.windows.net"
+                        client = BlobServiceClient(account_url=account_url, credential=None)
+                
+                container_client = client.get_container_client(container_name)
+                blob_client = container_client.get_blob_client(blob=blob_name)
+                stream = blob_client.download_blob()
+                blob_bytes = stream.readall()
+            except Exception as e:
+                logger.error(f"Error downloading blob {blob_name}: {e}")
+                return None
+
+            import io
+            try:
+                is_csv = blob_name.lower().endswith('.csv')
+                is_parquet = blob_name.lower().endswith(('.parquet', '.parq', '.pq'))
+                is_excel = blob_name.lower().endswith(('.xlsx', '.xls'))
+                is_text = blob_name.lower().endswith('.txt')
+                
+                if is_csv:
+                    sep = ','
+                    try:
+                        sample = blob_bytes[:2048].decode('utf-8', errors='ignore')
+                        if '\t' in sample: sep = '\t'
+                        elif ';' in sample: sep = ';'
+                        elif '|' in sample: sep = '|'
+                    except Exception:
+                        pass
+                    if limit:
+                        return pd.read_csv(io.BytesIO(blob_bytes), sep=sep, nrows=limit)
+                    return pd.read_csv(io.BytesIO(blob_bytes), sep=sep)
+                elif is_parquet:
+                    df = pd.read_parquet(io.BytesIO(blob_bytes))
+                    if limit:
+                        return df.head(limit)
+                    return df
+                elif is_excel:
+                    if limit:
+                        return pd.read_excel(io.BytesIO(blob_bytes), nrows=limit)
+                    return pd.read_excel(io.BytesIO(blob_bytes))
+                elif is_text:
+                    sep = ','
+                    try:
+                        sample = blob_bytes[:2048].decode('utf-8', errors='ignore')
+                        if '\t' in sample: sep = '\t'
+                        elif ';' in sample: sep = ';'
+                        elif '|' in sample: sep = '|'
+                    except Exception:
+                        pass
+                    if limit:
+                        return pd.read_csv(io.BytesIO(blob_bytes), sep=sep, nrows=limit)
+                    return pd.read_csv(io.BytesIO(blob_bytes), sep=sep)
+                else:
+                    if limit:
+                        return pd.read_csv(io.BytesIO(blob_bytes), nrows=limit)
+                    return pd.read_csv(io.BytesIO(blob_bytes))
+            except Exception as e:
+                logger.error(f"Error parsing blob data {blob_name} to DataFrame: {e}")
+                return None
+
         import os
         folder_path = self.connection.host
         

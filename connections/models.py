@@ -36,6 +36,7 @@ class DataConnection(models.Model):
         ('parquet', 'Flat File (Parquet)'),
         ('excel', 'Flat File (Excel)'),
         ('text', 'Flat File (Text)'),
+        ('azure_blob', 'Azure Blob Storage'),
     ]
 
     name = models.CharField(max_length=200, help_text='Friendly name for this connection')
@@ -74,7 +75,7 @@ class DataConnection(models.Model):
 
     @property
     def is_file(self):
-        return self.connection_type in ('csv', 'parquet', 'excel', 'text', 'flat_file')
+        return self.connection_type in ('csv', 'parquet', 'excel', 'text', 'flat_file', 'azure_blob')
 
     def set_password(self, raw_password):
         """Encrypt and store the database password."""

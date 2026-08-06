@@ -60,6 +60,11 @@ class DataConnectionForm(forms.ModelForm):
         elif connection_type in ('csv', 'parquet', 'excel', 'text'):
             if not cleaned_data.get('file') and not self.instance.file:
                 self.add_error('file', 'File upload is required.')
+        elif connection_type == 'azure_blob':
+            if not cleaned_data.get('host'):
+                self.add_error('host', 'Folder Path / Prefix is required for Azure Blob.')
+            if not cleaned_data.get('database_name'):
+                self.add_error('database_name', 'Container Name is required for Azure Blob.')
 
         return cleaned_data
 

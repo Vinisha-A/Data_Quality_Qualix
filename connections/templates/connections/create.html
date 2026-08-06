@@ -260,6 +260,27 @@ document.addEventListener('DOMContentLoaded', function() {
             {% if not is_edit or not connection.encrypted_password %}
             passwordInput.setAttribute('required', 'required');
             {% endif %}
+        } else if (val === 'azure_blob') {
+            dbFields.style.display = 'block';
+            fileFields.style.display = 'none';
+
+            if (groupPort) groupPort.style.display = 'none';
+            if (groupUsername) groupUsername.style.display = 'block';
+            if (groupPassword) groupPassword.style.display = 'block';
+            if (groupDriver) groupDriver.style.display = 'none';
+
+            labelHost.textContent = 'Folder Path / Prefix *';
+            labelDatabaseName.textContent = 'Container Name *';
+            labelUsername.textContent = 'Storage Account Name';
+            labelPassword.textContent = 'Account Key / SAS / Connection String';
+
+            hostInput.placeholder = 'e.g., blob/mkt-shared/Qualix';
+            databaseNameInput.placeholder = 'e.g., data1';
+            usernameInput.placeholder = 'Optional';
+            passwordInput.placeholder = 'Optional key or connection string';
+
+            hostInput.setAttribute('required', 'required');
+            databaseNameInput.setAttribute('required', 'required');
         } else {
             dbFields.style.display = 'none';
             fileFields.style.display = 'none';

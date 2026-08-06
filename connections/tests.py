@@ -466,4 +466,71 @@ class ConnectionViewsTestCase(TestCase):
         decoded_path = urllib.parse.unquote_plus(conn_str_path)
         self.assertIn('DRIVER=/usr/lib/db2/odbc_cli/clidriver/lib/libdb2o.so', decoded_path)
 
+    def test_azure_blob_connection(self):
+        from unittest.mock import patch, MagicMock
+        from .connector import ConnectorEngine
+        
+        # Create an Azure Blob connection
+        azure_conn = DataConnection.objects.create(
+            name='Test Azure Blob',
+            connection_type='azure_blob',
+            host='blob/mkt-shared/Qualix',
+            database_name='data1',
+            username='myaccount',
+            created_by=self.user
+        )
+        azure_conn.set_password('mysecretkey')
+        azure_conn.save()
+
+        # Mock the entire BlobServiceClient structure
+        mock_client = MagicMock()
+        mock_container_client = MagicMock()
+        mock_blob_client = MagicMock()
+        
+        # mock_container_client.list_blobs returns some dummy blob names
+        mock_blob1 = MagicMock()
+        mock_blob1.name = 'blob/mkt-shared/Qualix/sales.csv'
+        mock_blob2 = MagicMock()
+        mock_blob2.name = 'blob/mkt-shared/Qualix/customers.parquet'
+        mock_blob3 = MagicMock()
+        mock_blob3.name = 'blob/mkt-shared/Qualix/other.txt'
+        mock_blob4 = MagicMock()
+        mock_blob4.name = 'blob/mkt-shared/Qualix/subfolder/' # directory placeholder
+        
+        mock_container_client.list_blobs.return_value = [mock_blob1, mock_blob2, mock_blob3, mock_blob4]
+        
+        # download_blob returns a stream with content
+        mock_stream = MagicMock()
+        mock_stream.readall.return_value = b"col1,col2\nval1,val2"
+        mock_blob_client.download_blob.return_value = mock_stream
+        
+        mock_container_client.get_blob_client.return_value = mock_blob_client
+        mock_client.get_container_client.return_value = mock_container_client
+
+        with patch('connections.connector.BlobServiceClient') as mock_blob_service_class:
+            # Configure dynamic import mock
+            mock_blob_service_class.from_connection_string.return_value = mock_client
+            mock_blob_service_class.return_value = mock_client
+            
+            engine = ConnectorEngine(azure_conn)
+            
+            # Test get_tables()
+            tables = engine.get_tables()
+            # The prefix is 'blob/mkt-shared/Qualix/' so tables should be relative
+            self.assertEqual(tables, ['customers.parquet', 'other.txt', 'sales.csv'])
+            
+            # Test read_file()
+            df = engine.read_file(table='sales.csv')
+            self.assertIsNotNone(df)
+            self.assertEqual(list(df.columns), ['col1', 'col2'])
+            self.assertEqual(df.shape[0], 1)
+            
+            # Test with container auto-parse from host
+            azure_conn.database_name = ''
+            azure_conn.host = 'data1/blob/mkt-shared/Qualix'
+            azure_conn.save()
+            
+            tables_auto = engine.get_tables()
+            self.assertEqual(tables_auto, ['customers.parquet', 'other.txt', 'sales.csv'])
+
 
