@@ -120,6 +120,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const labelPassword = document.getElementById('label-password');
     const groupPassword = document.getElementById('group-password');
     const groupDriver = document.getElementById('group-driver');
+    const labelDriver = document.getElementById('label-driver');
+    const hintDriver = document.getElementById('hint-driver');
     const labelFile = document.getElementById('label-file');
 
     const hostInput = document.getElementById('id_host');
@@ -153,6 +155,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         resetRequired();
         showAllDbGroups();
+
+        if (labelDriver) labelDriver.textContent = 'Driver';
+        if (hintDriver) hintDriver.innerHTML = 'e.g., <code>cx_Oracle</code>, <code>oracledb</code> for Oracle &nbsp;|&nbsp; <code>pyodbc</code>, <code>connector</code> for Lakehouse';
 
         if (val === 'csv' || val === 'parquet' || val === 'excel' || val === 'text') {
             dbFields.style.display = 'none';
@@ -232,6 +237,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (driverInput) {
                     driverInput.placeholder = 'e.g., ibm_db or pyodbc;DRIVER={IBM DB2}';
                 }
+                if (hintDriver) {
+                    hintDriver.innerHTML = 'e.g., <code>ibm_db</code> or <code>pyodbc;DRIVER={IBM DB2}</code>';
+                }
             } else {
                 if (groupDriver) groupDriver.style.display = 'none';
             }
@@ -267,17 +275,24 @@ document.addEventListener('DOMContentLoaded', function() {
             if (groupPort) groupPort.style.display = 'none';
             if (groupUsername) groupUsername.style.display = 'block';
             if (groupPassword) groupPassword.style.display = 'block';
-            if (groupDriver) groupDriver.style.display = 'none';
+            if (groupDriver) groupDriver.style.display = 'block';
 
             labelHost.textContent = 'Folder Path / Prefix *';
             labelDatabaseName.textContent = 'Container Name *';
             labelUsername.textContent = 'Storage Account Name';
             labelPassword.textContent = 'Account Key / SAS / Connection String';
+            if (labelDriver) labelDriver.textContent = 'Custom Endpoint / Suffix';
 
             hostInput.placeholder = 'e.g., blob/mkt-shared/Qualix';
             databaseNameInput.placeholder = 'e.g., data1';
             usernameInput.placeholder = 'Optional';
             passwordInput.placeholder = 'Optional key or connection string';
+            if (driverInput) {
+                driverInput.placeholder = 'e.g., https://myaccount.blob.core.windows.net or blob.core.windows.net';
+            }
+            if (hintDriver) {
+                hintDriver.innerHTML = 'Optional. Custom endpoint or storage domain (e.g. Azurite local emulator, region endpoints).';
+            }
 
             hostInput.setAttribute('required', 'required');
             databaseNameInput.setAttribute('required', 'required');

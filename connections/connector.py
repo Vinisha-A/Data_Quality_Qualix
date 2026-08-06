@@ -490,11 +490,19 @@ class ConnectorEngine:
                 try:
                     conn_str = self.connection.get_password()
                     account_name = self.connection.username
+                    endpoint = (self.connection.driver or '').strip()
+                    
+                    if endpoint:
+                        if endpoint.startswith(('http://', 'https://')):
+                            account_url = endpoint
+                        else:
+                            account_url = f"https://{account_name}.{endpoint.lstrip('.')}"
+                    else:
+                        account_url = f"https://{account_name}.blob.core.windows.net"
                     
                     if conn_str and "DefaultEndpointsProtocol" in conn_str:
                         client = BlobServiceClient.from_connection_string(conn_str)
                     elif account_name and conn_str:
-                        account_url = f"https://{account_name}.blob.core.windows.net"
                         client = BlobServiceClient(account_url=account_url, credential=conn_str)
                     else:
                         env_conn = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
@@ -503,7 +511,13 @@ class ConnectorEngine:
                         else:
                             if not account_name:
                                 account_name = "devstoreaccount1"
-                            account_url = f"https://{account_name}.blob.core.windows.net"
+                            if endpoint:
+                                if endpoint.startswith(('http://', 'https://')):
+                                    account_url = endpoint
+                                else:
+                                    account_url = f"https://{account_name}.{endpoint.lstrip('.')}"
+                            else:
+                                account_url = f"https://{account_name}.blob.core.windows.net"
                             client = BlobServiceClient(account_url=account_url, credential=None)
                     
                     container_client = client.get_container_client(container_name)
@@ -1248,11 +1262,19 @@ class ConnectorEngine:
             try:
                 conn_str = self.connection.get_password()
                 account_name = self.connection.username
+                endpoint = (self.connection.driver or '').strip()
+                
+                if endpoint:
+                    if endpoint.startswith(('http://', 'https://')):
+                        account_url = endpoint
+                    else:
+                        account_url = f"https://{account_name}.{endpoint.lstrip('.')}"
+                else:
+                    account_url = f"https://{account_name}.blob.core.windows.net"
                 
                 if conn_str and "DefaultEndpointsProtocol" in conn_str:
                     client = BlobServiceClient.from_connection_string(conn_str)
                 elif account_name and conn_str:
-                    account_url = f"https://{account_name}.blob.core.windows.net"
                     client = BlobServiceClient(account_url=account_url, credential=conn_str)
                 else:
                     env_conn = os.environ.get("AZURE_STORAGE_CONNECTION_STRING")
@@ -1261,7 +1283,13 @@ class ConnectorEngine:
                     else:
                         if not account_name:
                             account_name = "devstoreaccount1"
-                        account_url = f"https://{account_name}.blob.core.windows.net"
+                        if endpoint:
+                            if endpoint.startswith(('http://', 'https://')):
+                                account_url = endpoint
+                            else:
+                                account_url = f"https://{account_name}.{endpoint.lstrip('.')}"
+                        else:
+                            account_url = f"https://{account_name}.blob.core.windows.net"
                         client = BlobServiceClient(account_url=account_url, credential=None)
                 
                 container_client = client.get_container_client(container_name)

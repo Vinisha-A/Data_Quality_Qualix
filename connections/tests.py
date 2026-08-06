@@ -533,4 +533,22 @@ class ConnectionViewsTestCase(TestCase):
             tables_auto = engine.get_tables()
             self.assertEqual(tables_auto, ['customers.parquet', 'other.txt', 'sales.csv'])
 
+            # Test custom endpoint (full URL)
+            azure_conn.driver = 'http://127.0.0.1:10000/devstoreaccount1'
+            azure_conn.save()
+            engine.get_tables()
+            mock_blob_service_class.assert_called_with(
+                account_url='http://127.0.0.1:10000/devstoreaccount1',
+                credential='mysecretkey'
+            )
+
+            # Test custom endpoint suffix
+            azure_conn.driver = 'blob.core.chinacloudapi.cn'
+            azure_conn.save()
+            engine.get_tables()
+            mock_blob_service_class.assert_called_with(
+                account_url='https://myaccount.blob.core.chinacloudapi.cn',
+                credential='mysecretkey'
+            )
+
 
