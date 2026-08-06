@@ -2260,7 +2260,7 @@ function addManualMappingRow(initialData = null) {
                 <div class="multiselect-select-box" onclick="toggleOpsDropdown(this)" style="padding: 6px 12px; font-size: 0.85rem; min-height: 34px; line-height: 20px;">
                     <span class="row-ops-count-span">Choose Validation</span>
                 </div>
-                <div class="multiselect-checkboxes" style="display: none; padding: 8px; position: absolute; z-index: 1000; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: var(--radius-sm); box-shadow: var(--shadow-md); width: 220px; right: 0;">
+                <div class="multiselect-checkboxes" style="display: none; padding: 8px; position: absolute; z-index: 1000; background: var(--bg-card); border: 1px solid var(--border-medium); border-radius: var(--radius-sm); box-shadow: var(--shadow-md); width: 280px; max-height: 250px; overflow-y: auto; right: 0;">
                     <!-- Checkboxes populated based on selected source datatype -->
                 </div>
             </div>
@@ -2293,9 +2293,9 @@ function addManualMappingRow(initialData = null) {
 
         let html = '';
         ops.forEach(op => {
-            const isChecked = (initialData && initialData.operations) ? initialData.operations.includes(op.value) : true;
+            const isChecked = (initialData && initialData.operations) ? initialData.operations.includes(op.value) : false;
             html += `
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 4px 8px; font-size: 0.8rem; margin: 0; font-weight: 500; width: 100%;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 10px; font-size: 0.8rem; margin: 0; font-weight: 500; width: 100%; border-bottom: 1px solid var(--border-light);">
                     <input type="checkbox" value="${op.value}" class="row-op-cb" ${isChecked ? 'checked' : ''} style="margin:0;">
                     <span>${op.label}</span>
                 </label>
